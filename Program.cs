@@ -143,6 +143,9 @@ namespace LabTools
         private Label lblFilesFound = null!;  
         private ProgressBar progressBar = null!;  
         private ComboBox cmbAspectCrop = null!;  
+
+        private Label lblCabinOrdersHeader = null!;
+        private ListBox lstCabinOrders = null!;
   
         private FileSystemWatcher? folderWatcher;  
         private FileSystemWatcher? printshopWatcher;  
@@ -433,15 +436,20 @@ namespace LabTools
             btnClearAll.Click += (s, e) => {   
                 txtSearch.Clear(); lstFiles.Items.Clear(); ResetLogoPreview();   
                 txtCabin.Clear(); txtCanvasCabin.Clear(); txtPrintCabinNum.Clear(); txtSeller.Clear();  
+                lstCabinOrders.Items.Clear(); lblCabinOrdersHeader.Text = "CABIN ORDERS (0)";
                 if (numPrintQty != null) numPrintQty.Value = 1;  
-                lblFilesFound.Text = "0 Files Found"; SetStatus("Cleared all search results, cabin numbers, and seller.");   
+                lblFilesFound.Text = "0 Files Found"; SetStatus("Cleared all search results, cabin numbers, seller, and order IDs.");   
             };  
   
-            Button btnOtherSource = new Button() { Text = "Select From Other Source (JPG)", Location = new Point(20, 98), Width = 230, Height = 35, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
+            // 3 BALANCED ACTION BUTTONS (Width = 175 each)
+            Button btnOtherSource = new Button() { Text = "Select Other Source", Location = new Point(20, 98), Width = 175, Height = 35, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
             btnOtherSource.Click += (s, e) => { SelectFilesFromOtherSource(); };  
   
-            Button btnExcelList = new Button() { Text = "Import From CSV List / Clipboard", Location = new Point(260, 98), Width = 235, Height = 35, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
+            Button btnExcelList = new Button() { Text = "Import CSV / Clipboard", Location = new Point(205, 98), Width = 175, Height = 35, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
             btnExcelList.Click += (s, e) => { ImportExcelOrClipboardList(); };  
+
+            Button btnCheckOrderIds = new Button() { Text = "Check Order IDs", Location = new Point(390, 98), Width = 175, Height = 35, BackColor = accentBlue, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };
+            btnCheckOrderIds.Click += (s, e) => { CheckOrderIdsForCabin(); };
   
             lstFiles = new CheckedListBox() { Location = new Point(20, 142), Width = 340, Height = 145, BackColor = Color.FromArgb(70, 70, 70), ForeColor = textWhite, AllowDrop = true };  
             lstFiles.SelectedIndexChanged += (s, e) => { PreviewSelectedImageSafe(); };  
@@ -533,6 +541,28 @@ namespace LabTools
             lblLastOrder = new Label() { Text = "Waiting for orders...", Location = new Point(5, 35), Width = 268, Height = 45, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
             alertBox.Controls.Add(lblOrderHeader);  
             alertBox.Controls.Add(lblLastOrder);  
+
+            // CABIN ORDERS SECTION (RED BOX AREA IN RIGHT PANEL)
+            lblCabinOrdersHeader = new Label() { Text = "CABIN ORDERS (0)", Location = new Point(15, 415), Width = 280, Height = 20, ForeColor = Color.FromArgb(130, 220, 210), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+            lstCabinOrders = new ListBox() { Location = new Point(15, 438), Width = 280, Height = 245, BackColor = Color.FromArgb(30, 31, 35), ForeColor = textWhite, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
+            lstCabinOrders.SelectedIndexChanged += (s, e) => {
+                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
+                {
+                    SetStatus($"Selected Order {order.OrderId} ({order.FilePaths.Count} photos) - Double-click to view & select photos.");
+                }
+            };
+            lstCabinOrders.DoubleClick += (s, e) => {
+                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
+                {
+                    using (var viewer = new OrderPhotoViewerForm(order, config.PrintedFolder))
+                    {
+                        if (viewer.ShowDialog(this) == DialogResult.OK && viewer.SelectedPhotoPaths.Count > 0)
+                        {
+                            ImportPhotosFromOrder(order, viewer.SelectedPhotoPaths);
+                        }
+                    }
+                }
+            };
   
             lblStatusRight = new Label() { Text = "Ready", Location = new Point(15, 695), Width = 280, Height = 30, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11, FontStyle.Bold) };  
   
@@ -540,6 +570,8 @@ namespace LabTools
             rightPanel.Controls.Add(lblCrop);  
             rightPanel.Controls.Add(cmbAspectCrop);  
             rightPanel.Controls.Add(alertBox);  
+            rightPanel.Controls.Add(lblCabinOrdersHeader);
+            rightPanel.Controls.Add(lstCabinOrders);
             rightPanel.Controls.Add(lblStatusRight);  
   
             this.Controls.Add(txtSearch);  
@@ -548,6 +580,7 @@ namespace LabTools
             this.Controls.Add(btnClearAll);  
             this.Controls.Add(btnOtherSource);  
             this.Controls.Add(btnExcelList);  
+            this.Controls.Add(btnCheckOrderIds);
             this.Controls.Add(lstFiles);  
             this.Controls.Add(btnSelectAll);  
             this.Controls.Add(btnUnselectAll);  
@@ -578,6 +611,297 @@ namespace LabTools
             this.Controls.Add(lblStatusLeft);  
             this.Controls.Add(rightPanel);  
         }  
+
+        // ========================================================================
+        // CHECK ORDER IDS (RECURSIVE SCAN ACROSS ORDERS FOLDER & SUBFOLDERS)
+        // ========================================================================
+        private async void CheckOrderIdsForCabin()
+        {
+            string targetCabin = txtSearch.Text.Trim();
+            if (string.IsNullOrEmpty(targetCabin) || targetCabin == "FileName - OrderID - Cabin No")
+            {
+                targetCabin = txtCabin.Text.Trim();
+            }
+
+            if (string.IsNullOrWhiteSpace(targetCabin))
+            {
+                MessageBox.Show("Please enter a cabin number in the search bar or cabin field to look up orders.", "Missing Cabin Number", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                txtSearch.Focus();
+                return;
+            }
+
+            string ordersDir = !string.IsNullOrWhiteSpace(config.OrdersFolder) ? config.OrdersFolder : @"Z:\PixelsOrder\Processed";
+            string printedDir = !string.IsNullOrWhiteSpace(config.PrintedFolder) ? config.PrintedFolder : @"Z:\Printed";
+
+            if (!Directory.Exists(ordersDir))
+            {
+                MessageBox.Show("The Orders folder cannot be found at:\n" + ordersDir + "\n\nPlease check your Settings.", "Orders Folder Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            btnFind.Enabled = false;
+            progressBar.Visible = true;
+            progressBar.Style = ProgressBarStyle.Marquee;
+            lblCabinOrdersHeader.Text = "SEARCHING ORDERS...";
+            lstCabinOrders.Items.Clear();
+            SetStatus("Scanning Orders folder and all subfolders for Cabin " + targetCabin + "...");
+
+            try
+            {
+                var matchedOrders = await Task.Run(() =>
+                {
+                    var list = new List<CabinOrderInfo>();
+                    var seenOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    // 1. Recursive scan through ordersDir and all subfolders
+                    var dirsToScan = new Stack<string>();
+                    dirsToScan.Push(ordersDir);
+
+                    while (dirsToScan.Count > 0)
+                    {
+                        string currentDir = dirsToScan.Pop();
+
+                        IEnumerable<string>? txtFiles = null;
+                        try { txtFiles = Directory.EnumerateFiles(currentDir, "*.txt"); } catch { }
+
+                        if (txtFiles != null)
+                        {
+                            foreach (string txtFile in txtFiles)
+                            {
+                                try
+                                {
+                                    // High-speed header check: scan the first 25 lines for ExtCabin = targetCabin
+                                    bool matchCabin = false;
+                                    using (var fs = new FileStream(txtFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                                    using (var reader = new StreamReader(fs, Encoding.UTF8))
+                                    {
+                                        for (int i = 0; i < 25; i++)
+                                        {
+                                            string? line = reader.ReadLine();
+                                            if (line == null) break;
+                                            var cm = CabinMatchRegex.Match(line);
+                                            if (cm.Success && cm.Groups[1].Value.Trim().Equals(targetCabin, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                matchCabin = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+
+                                    if (matchCabin)
+                                    {
+                                        string orderId = Path.GetFileNameWithoutExtension(txtFile);
+                                        if (!seenOrderIds.Contains(orderId))
+                                        {
+                                            seenOrderIds.Add(orderId);
+                                            string fullText = File.ReadAllText(txtFile);
+                                            var orderInfo = ParseOrderFileContent(txtFile, orderId, targetCabin, fullText, printedDir);
+                                            list.Add(orderInfo);
+                                        }
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+
+                        IEnumerable<string>? subDirs = null;
+                        try { subDirs = Directory.EnumerateDirectories(currentDir); } catch { }
+                        if (subDirs != null)
+                        {
+                            foreach (string sd in subDirs)
+                            {
+                                dirsToScan.Push(sd);
+                            }
+                        }
+                    }
+
+                    // 2. Cross-reference Active Voyage CSV logs
+                    try
+                    {
+                        foreach (string csvFile in Directory.GetFiles(ordersDir, "*Print History.csv", SearchOption.TopDirectoryOnly))
+                        {
+                            var lines = Program.SafeReadAllLines(csvFile).Skip(1);
+                            foreach (var line in lines)
+                            {
+                                var parts = ParseCsvLine(line);
+                                if (parts.Length >= 6)
+                                {
+                                    string oId = parts[1].Trim('"');
+                                    string cab = parts[2].Trim('"');
+                                    if (cab.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) && !seenOrderIds.Contains(oId))
+                                    {
+                                        seenOrderIds.Add(oId);
+                                        var info = new CabinOrderInfo
+                                        {
+                                            OrderId = oId,
+                                            Cabin = cab,
+                                            PrintSize = parts.Length > 4 ? parts[4].Trim('"') : "",
+                                            SourcePath = csvFile
+                                        };
+                                        if (parts.Length >= 8)
+                                        {
+                                            string rawFiles = parts[7].Trim('"');
+                                            foreach (var f in rawFiles.Split(new[] { " | " }, StringSplitOptions.RemoveEmptyEntries))
+                                            {
+                                                string safeName = Path.GetFileName(f.Trim());
+                                                string direct = Path.Combine(printedDir, safeName);
+                                                info.FilePaths.Add(File.Exists(direct) ? direct : safeName);
+                                            }
+                                        }
+                                        list.Add(info);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    return list.OrderByDescending(o => o.OrderId).ToList();
+                });
+
+                lstCabinOrders.BeginUpdate();
+                lstCabinOrders.Items.Clear();
+                foreach (var order in matchedOrders)
+                {
+                    lstCabinOrders.Items.Add(order);
+                }
+                lstCabinOrders.EndUpdate();
+
+                lblCabinOrdersHeader.Text = $"CABIN {targetCabin} ORDERS ({matchedOrders.Count})";
+
+                if (matchedOrders.Count > 0)
+                {
+                    SetStatus($"Found {matchedOrders.Count} order(s) for Cabin {targetCabin}. Double-click an order to view photos.");
+                }
+                else
+                {
+                    SetStatus($"No order tickets found for Cabin {targetCabin} in Processed or its subfolders.");
+                    MessageBox.Show($"No orders matching Cabin '{targetCabin}' were found in:\n{ordersDir}\n(including all subfolders).", "No Orders Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Search error: " + ex.Message);
+                MessageBox.Show("Error scanning orders: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                btnFind.Enabled = true;
+                progressBar.Visible = false;
+            }
+        }
+
+        private CabinOrderInfo ParseOrderFileContent(string filePath, string orderId, string cabin, string fullText, string printedDir)
+        {
+            var info = new CabinOrderInfo
+            {
+                OrderId = orderId,
+                Cabin = cabin,
+                SourcePath = filePath
+            };
+
+            var sizeMatch = SizeMatchRegex.Match(fullText);
+            if (sizeMatch.Success) info.PrintSize = sizeMatch.Groups[1].Value.Trim();
+
+            var typeMatch = Regex.Match(fullText, @"OrderFirstName\s*=\s*([^\r\n]+)", RegexOptions.IgnoreCase);
+            if (typeMatch.Success) info.OrderType = typeMatch.Groups[1].Value.Trim();
+
+            var qtyMatch = Regex.Match(fullText, @"Qty\s*=\s*(\d+)", RegexOptions.IgnoreCase);
+            if (qtyMatch.Success && int.TryParse(qtyMatch.Groups[1].Value, out int q)) info.Qty = q;
+
+            var rawFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string[] lines = fullText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var line in lines)
+            {
+                int fpIdx = line.IndexOf("FilePath", StringComparison.OrdinalIgnoreCase);
+                if (fpIdx >= 0)
+                {
+                    int eqIdx = line.IndexOf('=', fpIdx);
+                    if (eqIdx >= 0)
+                    {
+                        string rawPath = line.Substring(eqIdx + 1).Trim().Trim('"', '\'');
+                        if (!string.IsNullOrEmpty(rawPath))
+                        {
+                            rawFiles.Add(rawPath);
+                        }
+                    }
+                }
+            }
+
+            if (rawFiles.Count == 0)
+            {
+                foreach (Match m in PhotoRegex.Matches(fullText))
+                {
+                    string fName = Path.GetFileName(m.Groups[1].Value.Trim());
+                    if (!string.IsNullOrEmpty(fName) && fName.IndexOf("Copyright Release", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        rawFiles.Add(fName);
+                    }
+                }
+            }
+
+            foreach (string item in rawFiles)
+            {
+                if (File.Exists(item))
+                {
+                    info.FilePaths.Add(item);
+                }
+                else
+                {
+                    string fileName = Path.GetFileName(item);
+                    string candidate = Path.Combine(printedDir, fileName);
+                    if (File.Exists(candidate))
+                    {
+                        info.FilePaths.Add(candidate);
+                    }
+                    else
+                    {
+                        info.FilePaths.Add(item);
+                    }
+                }
+            }
+
+            return info;
+        }
+
+        private void ImportPhotosFromOrder(CabinOrderInfo order, List<string> selectedPhotos)
+        {
+            int addedCount = 0;
+            lstFiles.BeginUpdate();
+            foreach (string path in selectedPhotos)
+            {
+                string fName = Path.GetFileName(path);
+                bool exists = lstFiles.Items.Cast<FileItem>().Any(i => i.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) || i.FileName.Equals(fName, StringComparison.OrdinalIgnoreCase));
+                if (!exists)
+                {
+                    lstFiles.Items.Add(new FileItem { FileName = fName, FullPath = path }, true);
+                    addedCount++;
+                }
+            }
+            lstFiles.EndUpdate();
+
+            if (!string.IsNullOrEmpty(order.Cabin)) txtCabin.Text = order.Cabin;
+            if (!string.IsNullOrEmpty(order.PrintSize))
+            {
+                string cleanSize = order.PrintSize.Replace(" + Auto 4W", "").Replace(" (Canvas Copy)", "").Replace(" (canvas copy)", "");
+                if (!cmbPrintSizeInput.Items.Contains(cleanSize)) cmbPrintSizeInput.Items.Add(cleanSize);
+                cmbPrintSizeInput.Text = cleanSize;
+            }
+            if (order.Qty >= numPrintQty.Minimum && order.Qty <= numPrintQty.Maximum)
+            {
+                numPrintQty.Value = order.Qty;
+            }
+
+            lblFilesFound.Text = lstFiles.Items.Count + " Files Total";
+            SetStatus($"Imported {addedCount} photo(s) from Order {order.OrderId} for Cabin {order.Cabin}.");
+
+            if (lstFiles.Items.Count > 0)
+            {
+                lstFiles.SelectedIndex = lstFiles.Items.Count - 1;
+                PreviewSelectedImageSafe();
+            }
+        }
 
         private void HandleFileDragEnter(object? sender, DragEventArgs e)
         {
@@ -1327,8 +1651,7 @@ namespace LabTools
   
                 string printSize = cmbPrintSizeInput.Text.Trim();  
                 if (string.IsNullOrEmpty(printSize)) printSize = "4-Wallets (vert)";  
-  
-                // -- AUTO 4W FILTER LOGIC --  
+
                 bool isWalletSize = printSize.IndexOf("wallet", StringComparison.OrdinalIgnoreCase) >= 0 ||   
                                     printSize.IndexOf("4w", StringComparison.OrdinalIgnoreCase) >= 0;  
                 bool appendAuto4W = chkAuto4W.Checked && !isWalletSize;  
@@ -2314,6 +2637,300 @@ namespace LabTools
     }  
   
     // ========================================================================  
+    // CABIN ORDER DATA MODEL  
+    // ========================================================================  
+    public class CabinOrderInfo
+    {
+        public string OrderId { get; set; } = "";
+        public string Cabin { get; set; } = "";
+        public string PrintSize { get; set; } = "";
+        public string OrderType { get; set; } = "Package";
+        public int Qty { get; set; } = 1;
+        public string SourcePath { get; set; } = "";
+        public List<string> FilePaths { get; set; } = new List<string>();
+
+        public override string ToString()
+        {
+            string sizeLabel = string.IsNullOrEmpty(PrintSize) ? "" : " • " + PrintSize;
+            return $"{OrderId} ({FilePaths.Count} photo{(FilePaths.Count == 1 ? "" : "s")}{sizeLabel})";
+        }
+    }
+
+    // ========================================================================  
+    // ORDER PHOTO VIEWER & SELECTOR MODAL (1-PRESS SELECTION + BICUBIC PREVIEW)  
+    // ========================================================================  
+    public class OrderPhotoViewerForm : Form
+    {
+        public List<string> SelectedPhotoPaths { get; private set; } = new List<string>();
+        private CabinOrderInfo order;
+        private string printedFolder;
+
+        private CheckedListBox lstPhotos;
+        private PictureBox picThumb;
+        private Label lblCount;
+
+        public OrderPhotoViewerForm(CabinOrderInfo order, string printedFolder)
+        {
+            this.order = order;
+            this.printedFolder = !string.IsNullOrWhiteSpace(printedFolder) ? printedFolder : @"Z:\Printed";
+
+            this.Text = "Order " + order.OrderId + " - Photos (Cabin " + order.Cabin + ")";
+            this.Size = new Size(720, 520);
+            this.StartPosition = FormStartPosition.CenterParent;
+            this.BackColor = Color.FromArgb(43, 43, 43);
+            this.FormBorderStyle = FormBorderStyle.FixedDialog;
+            this.MaximizeBox = false;
+            this.MinimizeBox = false;
+
+            Label lblHeader = new Label()
+            {
+                Text = $"Order {order.OrderId}   •   Cabin: {order.Cabin}   •   Size: {order.PrintSize}   •   Total Photos: {order.FilePaths.Count}",
+                Location = new Point(20, 15),
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+            };
+
+            // 1-Press selection enabled via CheckOnClick = true
+            lstPhotos = new CheckedListBox()
+            {
+                Location = new Point(20, 45),
+                Width = 380,
+                Height = 320,
+                BackColor = Color.FromArgb(50, 50, 50),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9.5f),
+                CheckOnClick = true
+            };
+
+            for (int i = 0; i < order.FilePaths.Count; i++)
+            {
+                string p = order.FilePaths[i];
+                string displayName = Path.GetFileName(p);
+                lstPhotos.Items.Add(new PhotoCheckItem { FileName = displayName, FullPath = p }, true);
+            }
+
+            lstPhotos.SelectedIndexChanged += (s, e) => { ShowSelectedPreview(); };
+            lstPhotos.ItemCheck += (s, e) => {
+                this.BeginInvoke(new Action(UpdateSelectionLabel));
+            };
+
+            Button btnSelectAll = new Button()
+            {
+                Text = "Select All",
+                Location = new Point(20, 375),
+                Width = 110,
+                Height = 30,
+                BackColor = Color.FromArgb(54, 54, 54),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f)
+            };
+            btnSelectAll.Click += (s, e) =>
+            {
+                lstPhotos.BeginUpdate();
+                for (int i = 0; i < lstPhotos.Items.Count; i++) lstPhotos.SetItemChecked(i, true);
+                lstPhotos.EndUpdate();
+                UpdateSelectionLabel();
+            };
+
+            Button btnUnselectAll = new Button()
+            {
+                Text = "Unselect All",
+                Location = new Point(140, 375),
+                Width = 110,
+                Height = 30,
+                BackColor = Color.FromArgb(54, 54, 54),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 8.5f)
+            };
+            btnUnselectAll.Click += (s, e) =>
+            {
+                lstPhotos.BeginUpdate();
+                for (int i = 0; i < lstPhotos.Items.Count; i++) lstPhotos.SetItemChecked(i, false);
+                lstPhotos.EndUpdate();
+                UpdateSelectionLabel();
+            };
+
+            lblCount = new Label()
+            {
+                Text = $"{order.FilePaths.Count} of {order.FilePaths.Count} selected",
+                Location = new Point(260, 381),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(120, 240, 150),
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            };
+
+            Label lblPreviewHeader = new Label()
+            {
+                Text = "Image Preview:",
+                Location = new Point(420, 45),
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            };
+
+            picThumb = new PictureBox()
+            {
+                Location = new Point(420, 70),
+                Width = 260,
+                Height = 195,
+                BackColor = Color.FromArgb(20, 20, 20),
+                BorderStyle = BorderStyle.FixedSingle,
+                SizeMode = PictureBoxSizeMode.Zoom
+            };
+
+            Label lblFileStatus = new Label()
+            {
+                Text = "Click any photo to preview.",
+                Location = new Point(420, 275),
+                Width = 260,
+                Height = 60,
+                ForeColor = Color.LightGray,
+                Font = new Font("Segoe UI", 8.5f)
+            };
+
+            Button btnImport = new Button()
+            {
+                Text = "Import Selected for Printing",
+                Location = new Point(240, 425),
+                Width = 270,
+                Height = 40,
+                BackColor = Color.FromArgb(17, 122, 114),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold)
+            };
+            btnImport.Click += (s, e) =>
+            {
+                SelectedPhotoPaths.Clear();
+                foreach (var item in lstPhotos.CheckedItems.OfType<PhotoCheckItem>())
+                {
+                    SelectedPhotoPaths.Add(item.FullPath);
+                }
+
+                if (SelectedPhotoPaths.Count == 0)
+                {
+                    MessageBox.Show("Please check at least one photo to import.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
+
+            Button btnCancel = new Button()
+            {
+                Text = "Cancel",
+                Location = new Point(530, 425),
+                Width = 150,
+                Height = 40,
+                BackColor = Color.FromArgb(54, 54, 54),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            btnCancel.Click += (s, e) =>
+            {
+                this.DialogResult = DialogResult.Cancel;
+                this.Close();
+            };
+
+            this.Controls.Add(lblHeader);
+            this.Controls.Add(lstPhotos);
+            this.Controls.Add(btnSelectAll);
+            this.Controls.Add(btnUnselectAll);
+            this.Controls.Add(lblCount);
+            this.Controls.Add(lblPreviewHeader);
+            this.Controls.Add(picThumb);
+            this.Controls.Add(lblFileStatus);
+            this.Controls.Add(btnImport);
+            this.Controls.Add(btnCancel);
+
+            if (lstPhotos.Items.Count > 0)
+            {
+                lstPhotos.SelectedIndex = 0;
+                ShowSelectedPreview();
+            }
+        }
+
+        private void UpdateSelectionLabel()
+        {
+            lblCount.Text = $"{lstPhotos.CheckedItems.Count} of {lstPhotos.Items.Count} selected";
+        }
+
+        private void ShowSelectedPreview()
+        {
+            if (lstPhotos.SelectedItem is PhotoCheckItem item)
+            {
+                string resolvedPath = item.FullPath;
+                if (!File.Exists(resolvedPath))
+                {
+                    string candidate = Path.Combine(printedFolder, item.FileName);
+                    if (File.Exists(candidate)) resolvedPath = candidate;
+                }
+
+                if (File.Exists(resolvedPath))
+                {
+                    try
+                    {
+                        byte[] bytes = File.ReadAllBytes(resolvedPath);
+                        using (var ms = new MemoryStream(bytes))
+                        using (var img = Image.FromStream(ms))
+                        {
+                            Bitmap bmp = new Bitmap(picThumb.Width, picThumb.Height);
+                            using (Graphics g = Graphics.FromImage(bmp))
+                            {
+                                g.Clear(Color.FromArgb(20, 20, 20));
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                g.SmoothingMode = SmoothingMode.HighQuality;
+
+                                double rX = (double)picThumb.Width / img.Width;
+                                double rY = (double)picThumb.Height / img.Height;
+                                double r = Math.Min(rX, rY);
+
+                                int w = (int)(img.Width * r);
+                                int h = (int)(img.Height * r);
+                                int x = (picThumb.Width - w) / 2;
+                                int y = (picThumb.Height - h) / 2;
+
+                                g.DrawImage(img, x, y, w, h);
+                            }
+
+                            Image? old = picThumb.Image;
+                            picThumb.Image = bmp;
+                            old?.Dispose();
+                        }
+                    }
+                    catch
+                    {
+                        picThumb.Image = null;
+                    }
+                }
+                else
+                {
+                    picThumb.Image = null;
+                }
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            picThumb.Image?.Dispose();
+            base.OnFormClosed(e);
+        }
+
+        private class PhotoCheckItem
+        {
+            public string FileName { get; set; } = "";
+            public string FullPath { get; set; } = "";
+            public override string ToString() => FileName;
+        }
+    }
+
+    // ========================================================================  
     // MEDIA SIZE MANAGER FORM  
     // ========================================================================  
     public class MediaSizeManagerForm : Form
@@ -2519,7 +3136,6 @@ namespace LabTools
         private MemoryStream photoStream;  
         private MemoryStream borderStream;  
           
-        // Fast Render Engine Variables  
         private System.Windows.Forms.Timer renderTimer;  
         private bool isFastRender = false;  
           
@@ -2587,7 +3203,6 @@ namespace LabTools
             Button btnCancel = new Button() { Text = "Cancel", Location = new Point(770, 10), Width = 90, Height = 35, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
             btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };  
   
-            // Setup Fast Render Engine Timer  
             renderTimer = new System.Windows.Forms.Timer { Interval = 150 };  
             renderTimer.Tick += (s, e) => { renderTimer.Stop(); isFastRender = false; canvas.Invalidate(); };  
   
@@ -2672,7 +3287,6 @@ namespace LabTools
         {  
             e.Graphics.Clear(Color.Black);  
   
-            // Dynamic Fast Rendering Engine  
             if (isFastRender || isDragging)  
             {  
                 e.Graphics.InterpolationMode = InterpolationMode.Bilinear;  
