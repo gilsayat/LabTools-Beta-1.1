@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>LabTools</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- EMBEDS THE LOGO INTO THE .EXE FILE -->
+    <ApplicationIcon>labtools_icon.ico</ApplicationIcon>
+
+    <!-- ========================================== -->
+    <!-- APP METADATA & PUBLISHER INFO              -->
+    <!-- ========================================== -->
+    <Company>Gil Sayat</Company>
+    <Authors>Gil Sayat</Authors>
+    <Product>LabTools</Product>
+    <Description>Laboratory Workflow Automation System</Description>
+    <Copyright>Copyright © 2026 Gil Sayat</Copyright>
+    
+    <!-- ========================================== -->
+    <!-- EXTREME PERFORMANCE & COMPILER TUNING      -->
+    <!-- ========================================== -->
+    
+    <!-- Aggressive code optimization -->
+    <Optimize>true</Optimize>
+    
+    <!-- Dynamic Profile-Guided Optimization -->
+    <TieredPGO>true</TieredPGO>
+
+    <!-- ReadyToRun: Pre-compiles to native machine code during GitHub build -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+
+    <!-- Quick JIT: Minimizes startup delays -->
+    <TieredCompilation>true</TieredCompilation>
+    <TieredCompilationQuickJit>true</TieredCompilationQuickJit>
+
+    <!-- Strips out hidden debugging symbols -->
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
+
+    <!-- Background memory cleanup to prevent UI freezing -->
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    
+    <!-- Crisp UI scaling on modern monitors -->
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+
+    <!-- ========================================== -->
+    <!-- SINGLE-FILE STANDALONE EXECUTABLE SETTINGS -->
+    <!-- ========================================== -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+</Project>
