@@ -1,0 +1,9 @@
+# Build folders
+bin/
+obj/
+publish/
+
+# Visual Studio cache
+.vs/
+*.user
+*.suo
