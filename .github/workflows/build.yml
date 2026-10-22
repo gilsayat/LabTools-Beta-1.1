@@ -19,7 +19,7 @@ jobs:
         dotnet-version: '8.0'
 
     - name: Publish Single-File Executable
-      run: dotnet publish LabTools.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o publish/
+      run: dotnet publish LabTools.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish/
 
     - name: Upload Executable Artifact
       uses: actions/upload-artifact@v4
