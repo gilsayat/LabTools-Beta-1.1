@@ -60,15 +60,9 @@
   <!-- EMBEDDED ASSETS & DEPLOYMENT FILES         -->
   <!-- ========================================== -->
   <ItemGroup>
-    <Content Include="labtools_icon.ico">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="splash_stage1.jpg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="splash_stage2.jpg">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="splash_stage1.jpg" />
+    <EmbeddedResource Include="splash_stage2.jpg" />
+    <EmbeddedResource Include="labtools_icon.ico" />
   </ItemGroup>
 
 </Project>
