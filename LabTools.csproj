@@ -10,6 +10,12 @@
 
     <!-- EMBEDS THE LOGO INTO THE .EXE FILE -->
     <ApplicationIcon>labtools_icon.ico</ApplicationIcon>
+</PropertyGroup>
+<ItemGroup>
+  <Content Include="labtools_icon.ico">
+    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+  </Content>
+</ItemGroup>
 
     <!-- ========================================== -->
     <!-- APP METADATA & PUBLISHER INFO              -->
