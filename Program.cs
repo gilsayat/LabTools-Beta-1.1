@@ -2766,8 +2766,8 @@ namespace LabTools
         }  
     }  
 
- // ========================================================================  
-    // ADOBE-INSPIRED SPLASH SCREEN (16:9 CORRECTED ALIGNMENT)
+// ========================================================================  
+    // ADOBE-INSPIRED SPLASH SCREEN (1-SEC STAGES & TIGHTER ALIGNMENT)
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2775,14 +2775,13 @@ namespace LabTools
         private Bitmap? stage2Image;
         private System.Windows.Forms.Timer animTimer;
         private int tickCounter = 0;
-        private const int TotalTicks = 200; // 3.0 seconds total (1.5s per stage)
+        private const int TotalTicks = 134; // 2.0 seconds total (1 sec per stage) at 15ms ticks
         private float angleOffset = 0f;
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            // CORRECTED: 960x540 matches exactly the 16:9 ratio of the provided images
             this.Size = new Size(960, 540); 
             this.TopMost = true;
 
@@ -2803,9 +2802,6 @@ namespace LabTools
 
             animTimer = new System.Windows.Forms.Timer { Interval = 15 };
             animTimer.Tick += AnimTimer_Tick;
-
-            this.Click += (s, e) => CloseSplash();
-            this.KeyDown += (s, e) => CloseSplash();
         }
 
         protected override CreateParams CreateParams
@@ -2834,7 +2830,7 @@ namespace LabTools
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
             tickCounter++;
-            angleOffset = (angleOffset + 3.0f) % 360f; 
+            angleOffset = (angleOffset + 4.5f) % 360f; // Sped up orbit to match shorter duration
 
             if (tickCounter > TotalTicks)
             {
@@ -2856,36 +2852,39 @@ namespace LabTools
                     g.CompositingQuality = CompositingQuality.HighQuality;
 
                     // ========================================================================
-                    // STAGE 1 GEOMETRY CONFIG: Matches the outer card of the 16:9 images
+                    // ALIGNMENT VARIABLES: Adjust these if the glow is still too wide/tall
                     // ========================================================================
-                    int s1Width = 380;     
-                    int s1Height = 380;    
-                    int s1YOffset = 0;     
-                    Rectangle rectStage1 = new Rectangle((this.Width - s1Width) / 2, ((this.Height - s1Height) / 2) + s1YOffset, s1Width, s1Height);
+                    // OUTER CARD GLOW
+                    int s1Width = 320;     // Decrease if glow is too wide [Current: 320]
+                    int s1Height = 320;    // Decrease if glow is too tall [Current: 320]
+                    int s1YOffset = 0;     // Move up (-) or down (+)
+                    
+                    // INNER LOGO GLOW
+                    int s2Width = 100;     // Decrease if glow is too wide [Current: 100]
+                    int s2Height = 100;    // Decrease if glow is too tall [Current: 100]
+                    int s2YOffset = -60;   // Move up (-) or down (+)
+                    // ========================================================================
 
-                    // ========================================================================
-                    // STAGE 2 GEOMETRY CONFIG: Matches the inner "pixels" / "Lt" logo
-                    // ========================================================================
-                    int s2Width = 120;     
-                    int s2Height = 120;  
-                    int s2YOffset = -72;  
+                    Rectangle rectStage1 = new Rectangle((this.Width - s1Width) / 2, ((this.Height - s1Height) / 2) + s1YOffset, s1Width, s1Height);
                     Rectangle rectStage2 = new Rectangle((this.Width - s2Width) / 2, ((this.Height - s2Height) / 2) + s2YOffset, s2Width, s2Height);
 
                     float alpha1 = 0f;
                     float alpha2 = 0f;
 
-                    if (tickCounter <= 100)
+                    // 1 Second Stage 1 (Ticks 1-67)
+                    if (tickCounter <= 67)
                     {
-                        if (tickCounter <= 25) alpha1 = tickCounter / 25f; 
-                        else if (tickCounter <= 75) alpha1 = 1f; 
-                        else alpha1 = 1f - ((tickCounter - 75) / 25f); 
+                        if (tickCounter <= 16) alpha1 = tickCounter / 16f; 
+                        else if (tickCounter <= 51) alpha1 = 1f; 
+                        else alpha1 = 1f - ((tickCounter - 51) / 16f); 
                     }
+                    // 1 Second Stage 2 (Ticks 68-134)
                     else
                     {
-                        int t2 = tickCounter - 100;
-                        if (t2 <= 25) alpha2 = t2 / 25f; 
-                        else if (t2 <= 75) alpha2 = 1f; 
-                        else alpha2 = 1f - ((t2 - 75) / 25f); 
+                        int t2 = tickCounter - 67;
+                        if (t2 <= 16) alpha2 = t2 / 16f; 
+                        else if (t2 <= 51) alpha2 = 1f; 
+                        else alpha2 = 1f - ((t2 - 51) / 16f); 
                     }
 
                     if (alpha1 > 0.01f)
