@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
  // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (STUDIO-QUALITY GLOW)
+    // ADOBE-INSPIRED SPLASH SCREEN (INDEPENDENT STAGE GEOMETRY & THIN GLOW)
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2775,18 +2775,15 @@ namespace LabTools
         private Bitmap? stage2Image;
         private System.Windows.Forms.Timer animTimer;
         private int tickCounter = 0;
-        private const int TotalTicks = 266; // 4.0 seconds at 15ms ticks
+        private const int TotalTicks = 200; // 3.0 seconds total (1.5s per stage)
         private float angleOffset = 0f;
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(960, 600); // 16:10 Widescreen Canvas
-            this.BackColor = Color.FromArgb(10, 10, 12);
+            this.Size = new Size(960, 600); 
             this.TopMost = true;
-            this.DoubleBuffered = true;
-            this.Opacity = 1.0;
 
             try
             {
@@ -2810,9 +2807,20 @@ namespace LabTools
             this.KeyDown += (s, e) => CloseSplash();
         }
 
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                cp.ExStyle |= 0x00080000; // WS_EX_LAYERED for true desktop alpha blending
+                return cp;
+            }
+        }
+
         private void CloseSplash()
         {
             animTimer?.Stop();
+            this.DialogResult = DialogResult.OK;
             this.Close();
         }
 
@@ -2825,100 +2833,86 @@ namespace LabTools
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
             tickCounter++;
-            angleOffset = (angleOffset + 2.8f) % 360f; // Silky smooth rotation speed
+            angleOffset = (angleOffset + 3.0f) % 360f; 
 
             if (tickCounter > TotalTicks)
             {
                 CloseSplash();
                 return;
             }
-            this.Invalidate();
+            RenderLayeredWindow();
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        private void RenderLayeredWindow()
         {
-            Graphics g = e.Graphics;
-            g.Clear(Color.FromArgb(10, 10, 12));
-            
-            // Ultra-High Quality Compositing for flawless glow gradients
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.CompositingQuality = CompositingQuality.HighQuality;
-
-            // Master fade calculation
-            float masterFade = 1f;
-            if (tickCounter <= 33) masterFade = (float)tickCounter / 33f;
-            else if (tickCounter >= 233) masterFade = 1f - ((float)(tickCounter - 233) / 33f);
-
-            // Crossfade opacities between the two stages
-            float alpha1 = 0f;
-            float alpha2 = 0f;
-
-            if (tickCounter <= 113)
+            using (Bitmap memBitmap = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppArgb))
             {
-                alpha1 = masterFade;
-                alpha2 = 0f;
+                using (Graphics g = Graphics.FromImage(memBitmap))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.CompositingQuality = CompositingQuality.HighQuality;
+
+                    // ========================================================================
+                    // STAGE 1 GEOMETRY CONFIG: Matches the first PNG size
+                    // ========================================================================
+                    int s1Width = 430;     
+                    int s1Height = 430;    
+                    int s1YOffset = 0;     
+                    Rectangle rectStage1 = new Rectangle((this.Width - s1Width) / 2, ((this.Height - s1Height) / 2) + s1YOffset, s1Width, s1Height);
+
+                    // ========================================================================
+                    // STAGE 2 GEOMETRY CONFIG: Matches the second PNG size
+                    // ========================================================================
+                    int s2Width = 135;     
+                    int s2Height = 135;  
+                    int s2YOffset = -72;  
+                    Rectangle rectStage2 = new Rectangle((this.Width - s2Width) / 2, ((this.Height - s2Height) / 2) + s2YOffset, s2Width, s2Height);
+
+                    float alpha1 = 0f;
+                    float alpha2 = 0f;
+
+                    // Calculate independent fading stages
+                    if (tickCounter <= 100)
+                    {
+                        if (tickCounter <= 25) alpha1 = tickCounter / 25f; 
+                        else if (tickCounter <= 75) alpha1 = 1f; 
+                        else alpha1 = 1f - ((tickCounter - 75) / 25f); 
+                    }
+                    else
+                    {
+                        int t2 = tickCounter - 100;
+                        if (t2 <= 25) alpha2 = t2 / 25f; 
+                        else if (t2 <= 75) alpha2 = 1f; 
+                        else alpha2 = 1f - ((t2 - 75) / 25f); 
+                    }
+
+                    // Render Stage 1 (Image + Associated Thin Glow)
+                    if (alpha1 > 0.01f)
+                    {
+                        if (stage1Image != null) DrawCenteredImage(g, stage1Image, alpha1);
+                        DrawFlowingRoundedGlow(g, rectStage1, 22, angleOffset, alpha1, 1.2f, 5); // Thinner stroke (1.2f) and fewer glow layers (5)
+                    }
+
+                    // Render Stage 2 (Image + Associated Thin Glow)
+                    if (alpha2 > 0.01f)
+                    {
+                        if (stage2Image != null) DrawCenteredImage(g, stage2Image, alpha2);
+                        DrawFlowingRoundedGlow(g, rectStage2, 28, (360f - angleOffset), alpha2, 1.2f, 5); // Thinner stroke (1.2f) and fewer glow layers (5)
+                    }
+                }
+                
+                SetBitmap(memBitmap);
             }
-            else if (tickCounter <= 153)
-            {
-                float progress = (float)(tickCounter - 113) / 40f;
-                alpha1 = (1f - progress) * masterFade;
-                alpha2 = progress * masterFade;
-            }
-            else
-            {
-                alpha1 = 0f;
-                alpha2 = masterFade;
-            }
-
-            // 1. Draw the embedded PNG backgrounds seamlessly
-            if (stage1Image != null && alpha1 > 0.01f)
-                DrawCenteredImage(g, stage1Image, alpha1);
-
-            if (stage2Image != null && alpha2 > 0.01f)
-                DrawCenteredImage(g, stage2Image, alpha2);
-
-            // ========================================================================
-            // TWEAK THESE VALUES IF THE GLOW DOESN'T PERFECTLY ALIGN WITH YOUR PNG
-            // ========================================================================
-            int cardWidth = 475;
-            int cardHeight = 445;
-            int cardYOffset = -5; // Move the outer box up (-) or down (+)
-            
-            int badgeSize = 160;
-            int badgeYOffset = -60; // Move the inner box up (-) or down (+)
-            // ========================================================================
-
-            Rectangle cardRect = new Rectangle(
-                (this.Width - cardWidth) / 2, 
-                ((this.Height - cardHeight) / 2) + cardYOffset, 
-                cardWidth, 
-                cardHeight
-            );
-
-            Rectangle innerBadgeRect = new Rectangle(
-                (this.Width - badgeSize) / 2,
-                ((this.Height - badgeSize) / 2) + badgeYOffset,
-                badgeSize,
-                badgeSize
-            );
-
-            // 2. Draw the liquid flowing neon border on the outer card
-            DrawFlowingRoundedGlow(g, cardRect, 22, angleOffset, masterFade, 1.8f, 7);
-
-            // 3. Draw the liquid flowing neon border on the inner badge box (Orbiting in reverse)
-            DrawFlowingRoundedGlow(g, innerBadgeRect, 30, (360f - angleOffset), masterFade, 2.2f, 9);
         }
 
         private void DrawCenteredImage(Graphics g, Bitmap bmp, float opacity)
         {
             using (var attributes = new ImageAttributes())
             {
-                var matrix = new ColorMatrix();
-                matrix.Matrix33 = Math.Max(0f, Math.Min(1f, opacity));
+                var matrix = new ColorMatrix { Matrix33 = Math.Max(0f, Math.Min(1f, opacity)) };
                 attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-
                 Rectangle destRect = new Rectangle(0, 0, this.Width, this.Height);
                 g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, attributes);
             }
@@ -2928,7 +2922,6 @@ namespace LabTools
         {
             if (globalAlpha <= 0.01f) return;
 
-            // Calculate exact sweeping gradient coordinates based on current angle
             double rad = currentAngle * Math.PI / 180.0;
             float cx = bounds.X + bounds.Width / 2f;
             float cy = bounds.Y + bounds.Height / 2f;
@@ -2937,7 +2930,6 @@ namespace LabTools
             PointF pt1 = new PointF(cx - (float)(Math.Cos(rad) * r), cy - (float)(Math.Sin(rad) * r));
             PointF pt2 = new PointF(cx + (float)(Math.Cos(rad) * r), cy + (float)(Math.Sin(rad) * r));
 
-            // High-fidelity spectrum color blend
             ColorBlend cb = new ColorBlend(7)
             {
                 Colors = new Color[]
@@ -2955,42 +2947,25 @@ namespace LabTools
 
             using (GraphicsPath path = CreateRoundedRectangle(bounds, cornerRadius))
             {
-                // Draw the soft outer Gaussian-style aura
+                // Scaled down blur radius for a tighter, thinner glow
                 for (int i = glowLayers; i >= 1; i--)
                 {
-                    float width = strokeWidth + (i * 3.5f);
-                    int alpha = (int)(Math.Max(1, 30 - (i * 4)) * globalAlpha);
+                    float width = strokeWidth + (i * 2.0f);
+                    int alpha = (int)(Math.Max(1, 25 - (i * 4)) * globalAlpha);
 
-                    ColorBlend haloBlend = new ColorBlend(7)
+                    ColorBlend haloBlend = new ColorBlend(7) { Colors = cb.Colors.Select(c => Color.FromArgb(alpha, c)).ToArray(), Positions = cb.Positions };
+                    using (LinearGradientBrush lgbHalo = new LinearGradientBrush(pt1, pt2, Color.Transparent, Color.Transparent) { InterpolationColors = haloBlend })
+                    using (Pen glowPen = new Pen(lgbHalo, width) { LineJoin = LineJoin.Round })
                     {
-                        Colors = cb.Colors.Select(c => Color.FromArgb(alpha, c)).ToArray(),
-                        Positions = cb.Positions
-                    };
-
-                    using (LinearGradientBrush lgbHalo = new LinearGradientBrush(pt1, pt2, Color.Transparent, Color.Transparent))
-                    {
-                        lgbHalo.InterpolationColors = haloBlend;
-                        using (Pen glowPen = new Pen(lgbHalo, width) { LineJoin = LineJoin.Round })
-                        {
-                            g.DrawPath(glowPen, path);
-                        }
+                        g.DrawPath(glowPen, path);
                     }
                 }
 
-                // Draw the crisp, vibrant core neon line
-                ColorBlend coreBlend = new ColorBlend(7)
+                ColorBlend coreBlend = new ColorBlend(7) { Colors = cb.Colors.Select(c => Color.FromArgb((int)(255 * globalAlpha), c)).ToArray(), Positions = cb.Positions };
+                using (LinearGradientBrush lgbCore = new LinearGradientBrush(pt1, pt2, Color.White, Color.White) { InterpolationColors = coreBlend })
+                using (Pen corePen = new Pen(lgbCore, strokeWidth) { LineJoin = LineJoin.Round })
                 {
-                    Colors = cb.Colors.Select(c => Color.FromArgb((int)(255 * globalAlpha), c)).ToArray(),
-                    Positions = cb.Positions
-                };
-
-                using (LinearGradientBrush lgbCore = new LinearGradientBrush(pt1, pt2, Color.White, Color.White))
-                {
-                    lgbCore.InterpolationColors = coreBlend;
-                    using (Pen corePen = new Pen(lgbCore, strokeWidth) { LineJoin = LineJoin.Round })
-                    {
-                        g.DrawPath(corePen, path);
-                    }
+                    g.DrawPath(corePen, path);
                 }
             }
         }
@@ -3000,15 +2975,10 @@ namespace LabTools
             GraphicsPath path = new GraphicsPath();
             int diameter = radius * 2;
             Rectangle arc = new Rectangle(rect.X, rect.Y, diameter, diameter);
-
-            path.AddArc(arc, 180, 90);
-            arc.X = rect.Right - diameter;
-            path.AddArc(arc, 270, 90);
-            arc.Y = rect.Bottom - diameter;
-            path.AddArc(arc, 0, 90);
-            arc.X = rect.X;
-            path.AddArc(arc, 90, 90);
-            path.CloseFigure();
+            path.AddArc(arc, 180, 90); arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90); arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90); arc.X = rect.X;
+            path.AddArc(arc, 90, 90); path.CloseFigure();
             return path;
         }
 
@@ -3016,23 +2986,61 @@ namespace LabTools
         {
             int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;
             float f = (hue / 60) - (float)Math.Floor(hue / 60);
-
             value = value * 255;
-            int v = Convert.ToInt32(value);
-            int p = Convert.ToInt32(value * (1 - saturation));
-            int q = Convert.ToInt32(value * (1 - (f * saturation)));
-            int t = Convert.ToInt32(value * (1 - ((1 - f) * saturation)));
+            int v = Convert.ToInt32(value), p = Convert.ToInt32(value * (1 - saturation)), q = Convert.ToInt32(value * (1 - (f * saturation))), t = Convert.ToInt32(value * (1 - ((1 - f) * saturation)));
+            switch (hi) { case 0: return Color.FromArgb(v, t, p); case 1: return Color.FromArgb(q, v, p); case 2: return Color.FromArgb(p, v, t); case 3: return Color.FromArgb(p, q, v); case 4: return Color.FromArgb(t, p, v); default: return Color.FromArgb(v, p, q); }
+        }
 
-            switch (hi)
+        protected override void OnPaintBackground(PaintEventArgs e) { }
+
+        private void SetBitmap(Bitmap bitmap)
+        {
+            IntPtr screenDc = GetDC(IntPtr.Zero);
+            IntPtr memDc = CreateCompatibleDC(screenDc);
+            IntPtr hBitmap = IntPtr.Zero;
+            IntPtr oldBitmap = IntPtr.Zero;
+
+            try
             {
-                case 0: return Color.FromArgb(v, t, p);
-                case 1: return Color.FromArgb(q, v, p);
-                case 2: return Color.FromArgb(p, v, t);
-                case 3: return Color.FromArgb(p, q, v);
-                case 4: return Color.FromArgb(t, p, v);
-                default: return Color.FromArgb(v, p, q);
+                hBitmap = bitmap.GetHbitmap(Color.FromArgb(0));
+                oldBitmap = SelectObject(memDc, hBitmap);
+
+                Size size = new Size(bitmap.Width, bitmap.Height);
+                Point pointSource = new Point(0, 0);
+                Point topPos = new Point(Left, Top);
+                BLENDFUNCTION blend = new BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
+
+                UpdateLayeredWindow(this.Handle, screenDc, ref topPos, ref size, memDc, ref pointSource, 0, ref blend, 2);
+            }
+            finally
+            {
+                ReleaseDC(IntPtr.Zero, screenDc);
+                if (hBitmap != IntPtr.Zero)
+                {
+                    SelectObject(memDc, oldBitmap);
+                    DeleteObject(hBitmap);
+                }
+                DeleteDC(memDc);
             }
         }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        private struct BLENDFUNCTION { public byte BlendOp; public byte BlendFlags; public byte SourceConstantAlpha; public byte AlphaFormat; }
+
+        [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref Point pptDst, ref Size psize, IntPtr hdcSrc, ref Point pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+        [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll", ExactSpelling = true)]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll", ExactSpelling = true)]
+        private static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
+        private static extern bool DeleteObject(IntPtr hObject);
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
