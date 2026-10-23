@@ -3479,4 +3479,27 @@ namespace LabTools
             base.OnFormClosed(e);
         }
     }
+public SplashForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Size = new Size(520, 330);
+            this.BackColor = Color.FromArgb(18, 19, 22);
+            this.TopMost = true;
+            this.DoubleBuffered = true;
+            this.Opacity = 0.0;
+
+            try
+            {
+                string path1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage1.jpg");
+                string path2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage2.jpg");
+
+                if (File.Exists(path1)) stage1Image = Image.FromFile(path1);
+                if (File.Exists(path2)) stage2Image = Image.FromFile(path2);
+            }
+            catch { }
+
+            animTimer = new System.Windows.Forms.Timer { Interval = 15 };
+            animTimer.Tick += AnimTimer_Tick;
+        }
 }
