@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
     // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (3-SECOND TOTAL DURATION)  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (STREAM-BASED)  
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2794,8 +2794,23 @@ namespace LabTools
                 string path1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage1.jpg");
                 string path2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage2.jpg");
 
-                if (File.Exists(path1)) stage1Image = Image.FromFile(path1);
-                if (File.Exists(path2)) stage2Image = Image.FromFile(path2);
+                if (File.Exists(path1))
+                {
+                    byte[] bytes1 = File.ReadAllBytes(path1);
+                    using (var ms = new MemoryStream(bytes1))
+                    {
+                        stage1Image = new Bitmap(ms);
+                    }
+                }
+
+                if (File.Exists(path2))
+                {
+                    byte[] bytes2 = File.ReadAllBytes(path2);
+                    using (var ms = new MemoryStream(bytes2))
+                    {
+                        stage2Image = new Bitmap(ms);
+                    }
+                }
             }
             catch { }
 
@@ -2868,6 +2883,14 @@ namespace LabTools
             if (currentImg != null)
             {
                 e.Graphics.DrawImage(currentImg, 0, 0, this.Width, this.Height);
+            }
+            else
+            {
+                // Fallback background text if image streams are missing
+                using (Font f = new Font("Segoe UI", 12, FontStyle.Bold))
+                {
+                    e.Graphics.DrawString("Loading LabTools...", f, Brushes.White, new PointF(160, 140));
+                }
             }
         }
 
