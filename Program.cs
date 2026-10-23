@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
  // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (4-SEC, LARGE, CROSSFADE)  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (STUDIO-QUALITY GLOW)
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2775,31 +2775,30 @@ namespace LabTools
         private Bitmap? stage2Image;
         private System.Windows.Forms.Timer animTimer;
         private int tickCounter = 0;
-        private const int TotalTicks = 266; // Exactly 4 seconds total duration at 15ms interval
+        private const int TotalTicks = 266; // 4.0 seconds at 15ms ticks
+        private float angleOffset = 0f;
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(960, 600); // Larger, prominent canvas size
-            this.BackColor = Color.Magenta; // Transparent background key color
-            this.TransparencyKey = Color.Magenta; 
+            this.Size = new Size(960, 600); // 16:10 Widescreen Canvas
+            this.BackColor = Color.FromArgb(10, 10, 12);
             this.TopMost = true;
             this.DoubleBuffered = true;
-            this.Opacity = 1.0; // Handled via internal alpha color matrix for seamless blending
+            this.Opacity = 1.0;
 
             try
             {
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                
-                using (var stream1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.png"))
+                using (var s1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.png"))
                 {
-                    if (stream1 != null) stage1Image = new Bitmap(stream1);
+                    if (s1 != null) stage1Image = new Bitmap(s1);
                 }
 
-                using (var stream2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.png"))
+                using (var s2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.png"))
                 {
-                    if (stream2 != null) stage2Image = new Bitmap(stream2);
+                    if (s2 != null) stage2Image = new Bitmap(s2);
                 }
             }
             catch { }
@@ -2826,6 +2825,8 @@ namespace LabTools
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
             tickCounter++;
+            angleOffset = (angleOffset + 2.8f) % 360f; // Silky smooth rotation speed
+
             if (tickCounter > TotalTicks)
             {
                 CloseSplash();
@@ -2836,59 +2837,78 @@ namespace LabTools
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.Clear(Color.Magenta);
-            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
-            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            Graphics g = e.Graphics;
+            g.Clear(Color.FromArgb(10, 10, 12));
+            
+            // Ultra-High Quality Compositing for flawless glow gradients
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
 
-            // 4-Second Breakdown (266 total ticks at 15ms):
-            // Ticks 0 - 33   (~0.5s): Stage 1 Fade-In (0.0 -> 1.0)
-            // Ticks 34 - 113 (~1.2s): Stage 1 Hold (1.0)
-            // Ticks 114 - 153(~0.6s): Smooth Crossfade (Stage 1: 1.0->0.0, Stage 2: 0.0->1.0)
-            // Ticks 154 - 233(~1.2s): Stage 2 Hold (1.0)
-            // Ticks 234 - 266(~0.5s): Stage 2 Fade-Out (1.0 -> 0.0)
+            // Master fade calculation
+            float masterFade = 1f;
+            if (tickCounter <= 33) masterFade = (float)tickCounter / 33f;
+            else if (tickCounter >= 233) masterFade = 1f - ((float)(tickCounter - 233) / 33f);
 
+            // Crossfade opacities between the two stages
             float alpha1 = 0f;
             float alpha2 = 0f;
 
-            if (tickCounter <= 33)
+            if (tickCounter <= 113)
             {
-                alpha1 = (float)tickCounter / 33f;
-                alpha2 = 0f;
-            }
-            else if (tickCounter <= 113)
-            {
-                alpha1 = 1f;
+                alpha1 = masterFade;
                 alpha2 = 0f;
             }
             else if (tickCounter <= 153)
             {
                 float progress = (float)(tickCounter - 113) / 40f;
-                alpha1 = 1f - progress; // Melts away
-                alpha2 = progress;      // Melts in
-            }
-            else if (tickCounter <= 233)
-            {
-                alpha1 = 0f;
-                alpha2 = 1f;
+                alpha1 = (1f - progress) * masterFade;
+                alpha2 = progress * masterFade;
             }
             else
             {
                 alpha1 = 0f;
-                alpha2 = 1f - ((float)(tickCounter - 233) / 33f);
+                alpha2 = masterFade;
             }
 
-            // Draw Stage 1 centered with calculated alpha
-            if (stage1Image != null && alpha1 > 0f)
-            {
-                DrawCenteredImage(e.Graphics, stage1Image, alpha1);
-            }
+            // 1. Draw the embedded PNG backgrounds seamlessly
+            if (stage1Image != null && alpha1 > 0.01f)
+                DrawCenteredImage(g, stage1Image, alpha1);
 
-            // Draw Stage 2 centered with calculated alpha overlapping smoothly
-            if (stage2Image != null && alpha2 > 0f)
-            {
-                DrawCenteredImage(e.Graphics, stage2Image, alpha2);
-            }
+            if (stage2Image != null && alpha2 > 0.01f)
+                DrawCenteredImage(g, stage2Image, alpha2);
+
+            // ========================================================================
+            // TWEAK THESE VALUES IF THE GLOW DOESN'T PERFECTLY ALIGN WITH YOUR PNG
+            // ========================================================================
+            int cardWidth = 475;
+            int cardHeight = 445;
+            int cardYOffset = -5; // Move the outer box up (-) or down (+)
+            
+            int badgeSize = 160;
+            int badgeYOffset = -60; // Move the inner box up (-) or down (+)
+            // ========================================================================
+
+            Rectangle cardRect = new Rectangle(
+                (this.Width - cardWidth) / 2, 
+                ((this.Height - cardHeight) / 2) + cardYOffset, 
+                cardWidth, 
+                cardHeight
+            );
+
+            Rectangle innerBadgeRect = new Rectangle(
+                (this.Width - badgeSize) / 2,
+                ((this.Height - badgeSize) / 2) + badgeYOffset,
+                badgeSize,
+                badgeSize
+            );
+
+            // 2. Draw the liquid flowing neon border on the outer card
+            DrawFlowingRoundedGlow(g, cardRect, 22, angleOffset, masterFade, 1.8f, 7);
+
+            // 3. Draw the liquid flowing neon border on the inner badge box (Orbiting in reverse)
+            DrawFlowingRoundedGlow(g, innerBadgeRect, 30, (360f - angleOffset), masterFade, 2.2f, 9);
         }
 
         private void DrawCenteredImage(Graphics g, Bitmap bmp, float opacity)
@@ -2896,12 +2916,121 @@ namespace LabTools
             using (var attributes = new ImageAttributes())
             {
                 var matrix = new ColorMatrix();
-                matrix.Matrix33 = opacity; // Sets transparency channel
+                matrix.Matrix33 = Math.Max(0f, Math.Min(1f, opacity));
                 attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
 
-                // Perfectly centered scaling to fit the larger form canvas bounds
                 Rectangle destRect = new Rectangle(0, 0, this.Width, this.Height);
                 g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, attributes);
+            }
+        }
+
+        private void DrawFlowingRoundedGlow(Graphics g, Rectangle bounds, int cornerRadius, float currentAngle, float globalAlpha, float strokeWidth, int glowLayers)
+        {
+            if (globalAlpha <= 0.01f) return;
+
+            // Calculate exact sweeping gradient coordinates based on current angle
+            double rad = currentAngle * Math.PI / 180.0;
+            float cx = bounds.X + bounds.Width / 2f;
+            float cy = bounds.Y + bounds.Height / 2f;
+            float r = (float)Math.Sqrt((bounds.Width * bounds.Width) + (bounds.Height * bounds.Height)) / 1.5f;
+
+            PointF pt1 = new PointF(cx - (float)(Math.Cos(rad) * r), cy - (float)(Math.Sin(rad) * r));
+            PointF pt2 = new PointF(cx + (float)(Math.Cos(rad) * r), cy + (float)(Math.Sin(rad) * r));
+
+            // High-fidelity spectrum color blend
+            ColorBlend cb = new ColorBlend(7)
+            {
+                Colors = new Color[]
+                {
+                    ColorFromHsv((currentAngle + 0f) % 360f, 0.90f, 1.0f),
+                    ColorFromHsv((currentAngle + 60f) % 360f, 0.85f, 1.0f),
+                    ColorFromHsv((currentAngle + 120f) % 360f, 0.95f, 1.0f),
+                    ColorFromHsv((currentAngle + 180f) % 360f, 0.85f, 1.0f),
+                    ColorFromHsv((currentAngle + 240f) % 360f, 0.90f, 1.0f),
+                    ColorFromHsv((currentAngle + 300f) % 360f, 0.85f, 1.0f),
+                    ColorFromHsv((currentAngle + 360f) % 360f, 0.90f, 1.0f)
+                },
+                Positions = new float[] { 0.0f, 0.16f, 0.33f, 0.5f, 0.66f, 0.83f, 1.0f }
+            };
+
+            using (GraphicsPath path = CreateRoundedRectangle(bounds, cornerRadius))
+            {
+                // Draw the soft outer Gaussian-style aura
+                for (int i = glowLayers; i >= 1; i--)
+                {
+                    float width = strokeWidth + (i * 3.5f);
+                    int alpha = (int)(Math.Max(1, 30 - (i * 4)) * globalAlpha);
+
+                    ColorBlend haloBlend = new ColorBlend(7)
+                    {
+                        Colors = cb.Colors.Select(c => Color.FromArgb(alpha, c)).ToArray(),
+                        Positions = cb.Positions
+                    };
+
+                    using (LinearGradientBrush lgbHalo = new LinearGradientBrush(pt1, pt2, Color.Transparent, Color.Transparent))
+                    {
+                        lgbHalo.InterpolationColors = haloBlend;
+                        using (Pen glowPen = new Pen(lgbHalo, width) { LineJoin = LineJoin.Round })
+                        {
+                            g.DrawPath(glowPen, path);
+                        }
+                    }
+                }
+
+                // Draw the crisp, vibrant core neon line
+                ColorBlend coreBlend = new ColorBlend(7)
+                {
+                    Colors = cb.Colors.Select(c => Color.FromArgb((int)(255 * globalAlpha), c)).ToArray(),
+                    Positions = cb.Positions
+                };
+
+                using (LinearGradientBrush lgbCore = new LinearGradientBrush(pt1, pt2, Color.White, Color.White))
+                {
+                    lgbCore.InterpolationColors = coreBlend;
+                    using (Pen corePen = new Pen(lgbCore, strokeWidth) { LineJoin = LineJoin.Round })
+                    {
+                        g.DrawPath(corePen, path);
+                    }
+                }
+            }
+        }
+
+        private static GraphicsPath CreateRoundedRectangle(Rectangle rect, int radius)
+        {
+            GraphicsPath path = new GraphicsPath();
+            int diameter = radius * 2;
+            Rectangle arc = new Rectangle(rect.X, rect.Y, diameter, diameter);
+
+            path.AddArc(arc, 180, 90);
+            arc.X = rect.Right - diameter;
+            path.AddArc(arc, 270, 90);
+            arc.Y = rect.Bottom - diameter;
+            path.AddArc(arc, 0, 90);
+            arc.X = rect.X;
+            path.AddArc(arc, 90, 90);
+            path.CloseFigure();
+            return path;
+        }
+
+        private static Color ColorFromHsv(float hue, float saturation, float value)
+        {
+            int hi = Convert.ToInt32(Math.Floor(hue / 60)) % 6;
+            float f = (hue / 60) - (float)Math.Floor(hue / 60);
+
+            value = value * 255;
+            int v = Convert.ToInt32(value);
+            int p = Convert.ToInt32(value * (1 - saturation));
+            int q = Convert.ToInt32(value * (1 - (f * saturation)));
+            int t = Convert.ToInt32(value * (1 - ((1 - f) * saturation)));
+
+            switch (hi)
+            {
+                case 0: return Color.FromArgb(v, t, p);
+                case 1: return Color.FromArgb(q, v, p);
+                case 2: return Color.FromArgb(p, v, t);
+                case 3: return Color.FromArgb(p, q, v);
+                case 4: return Color.FromArgb(t, p, v);
+                default: return Color.FromArgb(v, p, q);
             }
         }
 
