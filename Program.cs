@@ -31,7 +31,7 @@ namespace LabTools
             Application.EnableVisualStyles();  
             Application.SetCompatibleTextRenderingDefault(false);  
 
-            // Run Adobe-inspired Splash Screen first
+            // Run Two-Stage Splash Screen first
             using (var splash = new SplashForm())
             {
                 splash.ShowDialog();
@@ -129,6 +129,7 @@ namespace LabTools
         private TextBox txtSearch = null!;  
         private Button btnFind = null!;  
         private Button btnCancelSearch = null!;  
+        private Button btnCheckOrderIds = null!;  
         private CheckedListBox lstFiles = null!;   
         private PictureBox picLogo = null!;      
         private ComboBox cmbMachine = null!;  
@@ -449,6 +450,7 @@ namespace LabTools
                 lblFilesFound.Text = "0 Files Found"; SetStatus("Cleared all search results, cabin numbers, seller, and order IDs.");   
             };  
   
+            // 3 BALANCED ACTION BUTTONS (Width = 175 each)
             Button btnOtherSource = new Button() { Text = "Select Other Source", Location = new Point(20, 98), Width = 175, Height = 35, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
             btnOtherSource.Click += (s, e) => { SelectFilesFromOtherSource(); };  
   
