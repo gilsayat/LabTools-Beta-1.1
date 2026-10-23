@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
     // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (STREAM-BASED)  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (EMBEDDED RESOURCES)  
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2791,25 +2791,18 @@ namespace LabTools
 
             try
             {
-                string path1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage1.jpg");
-                string path2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage2.jpg");
-
-                if (File.Exists(path1))
+                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+                
+                // Read Stage 1 from embedded assembly resources
+                using (var stream1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.jpg"))
                 {
-                    byte[] bytes1 = File.ReadAllBytes(path1);
-                    using (var ms = new MemoryStream(bytes1))
-                    {
-                        stage1Image = new Bitmap(ms);
-                    }
+                    if (stream1 != null) stage1Image = new Bitmap(stream1);
                 }
 
-                if (File.Exists(path2))
+                // Read Stage 2 from embedded assembly resources
+                using (var stream2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.jpg"))
                 {
-                    byte[] bytes2 = File.ReadAllBytes(path2);
-                    using (var ms = new MemoryStream(bytes2))
-                    {
-                        stage2Image = new Bitmap(ms);
-                    }
+                    if (stream2 != null) stage2Image = new Bitmap(stream2);
                 }
             }
             catch { }
@@ -2886,7 +2879,6 @@ namespace LabTools
             }
             else
             {
-                // Fallback background text if image streams are missing
                 using (Font f = new Font("Segoe UI", 12, FontStyle.Bold))
                 {
                     e.Graphics.DrawString("Loading LabTools...", f, Brushes.White, new PointF(160, 140));
