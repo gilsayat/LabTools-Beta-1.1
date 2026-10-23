@@ -3420,8 +3420,8 @@ namespace LabTools
         private System.Windows.Forms.Timer animTimer;
         private Stopwatch stopwatch = new Stopwatch();
 
-        private const int StageDurationMs = 500; // 0.5 seconds per PNG
-        private const int TotalDurationMs = 1000; // 1.0 second total
+        private const int StageDurationMs = 750; // 0.5 seconds per PNG
+        private const int TotalDurationMs = 1500; // 1.0 second total
         private const int FadeDurationMs = 20;    // 20ms fast fade in/out
 
         public SplashForm()
