@@ -60,8 +60,8 @@
   <!-- EMBEDDED ASSETS & DEPLOYMENT FILES         -->
   <!-- ========================================== -->
   <ItemGroup>
-    <EmbeddedResource Include="splash_stage1.jpg" />
-    <EmbeddedResource Include="splash_stage2.jpg" />
+    <EmbeddedResource Include="splash_stage1.png" />
+    <EmbeddedResource Include="splash_stage2.png" />
     <EmbeddedResource Include="labtools_icon.ico" />
   </ItemGroup>
 
