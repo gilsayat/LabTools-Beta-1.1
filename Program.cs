@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
  // ========================================================================  
-    // ADOBE-INSPIRED SPLASH SCREEN (INDEPENDENT STAGE GEOMETRY & THIN GLOW)
+    // ADOBE-INSPIRED SPLASH SCREEN (16:9 CORRECTED ALIGNMENT)
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2782,7 +2782,8 @@ namespace LabTools
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(960, 600); 
+            // CORRECTED: 960x540 matches exactly the 16:9 ratio of the provided images
+            this.Size = new Size(960, 540); 
             this.TopMost = true;
 
             try
@@ -2812,7 +2813,7 @@ namespace LabTools
             get
             {
                 CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x00080000; // WS_EX_LAYERED for true desktop alpha blending
+                cp.ExStyle |= 0x00080000; 
                 return cp;
             }
         }
@@ -2855,25 +2856,24 @@ namespace LabTools
                     g.CompositingQuality = CompositingQuality.HighQuality;
 
                     // ========================================================================
-                    // STAGE 1 GEOMETRY CONFIG: Matches the first PNG size
+                    // STAGE 1 GEOMETRY CONFIG: Matches the outer card of the 16:9 images
                     // ========================================================================
-                    int s1Width = 430;     
-                    int s1Height = 430;    
+                    int s1Width = 380;     
+                    int s1Height = 380;    
                     int s1YOffset = 0;     
                     Rectangle rectStage1 = new Rectangle((this.Width - s1Width) / 2, ((this.Height - s1Height) / 2) + s1YOffset, s1Width, s1Height);
 
                     // ========================================================================
-                    // STAGE 2 GEOMETRY CONFIG: Matches the second PNG size
+                    // STAGE 2 GEOMETRY CONFIG: Matches the inner "pixels" / "Lt" logo
                     // ========================================================================
-                    int s2Width = 135;     
-                    int s2Height = 135;  
+                    int s2Width = 120;     
+                    int s2Height = 120;  
                     int s2YOffset = -72;  
                     Rectangle rectStage2 = new Rectangle((this.Width - s2Width) / 2, ((this.Height - s2Height) / 2) + s2YOffset, s2Width, s2Height);
 
                     float alpha1 = 0f;
                     float alpha2 = 0f;
 
-                    // Calculate independent fading stages
                     if (tickCounter <= 100)
                     {
                         if (tickCounter <= 25) alpha1 = tickCounter / 25f; 
@@ -2888,18 +2888,18 @@ namespace LabTools
                         else alpha2 = 1f - ((t2 - 75) / 25f); 
                     }
 
-                    // Render Stage 1 (Image + Associated Thin Glow)
                     if (alpha1 > 0.01f)
                     {
                         if (stage1Image != null) DrawCenteredImage(g, stage1Image, alpha1);
-                        DrawFlowingRoundedGlow(g, rectStage1, 22, angleOffset, alpha1, 1.2f, 5); // Thinner stroke (1.2f) and fewer glow layers (5)
+                        DrawFlowingRoundedGlow(g, rectStage1, 16, angleOffset, alpha1, 1.2f, 4); 
+                        DrawFlowingRoundedGlow(g, rectStage2, 22, (360f - angleOffset), alpha1, 1.2f, 4); 
                     }
 
-                    // Render Stage 2 (Image + Associated Thin Glow)
                     if (alpha2 > 0.01f)
                     {
                         if (stage2Image != null) DrawCenteredImage(g, stage2Image, alpha2);
-                        DrawFlowingRoundedGlow(g, rectStage2, 28, (360f - angleOffset), alpha2, 1.2f, 5); // Thinner stroke (1.2f) and fewer glow layers (5)
+                        DrawFlowingRoundedGlow(g, rectStage1, 16, angleOffset, alpha2, 1.2f, 4); 
+                        DrawFlowingRoundedGlow(g, rectStage2, 22, (360f - angleOffset), alpha2, 1.2f, 4); 
                     }
                 }
                 
@@ -2947,7 +2947,6 @@ namespace LabTools
 
             using (GraphicsPath path = CreateRoundedRectangle(bounds, cornerRadius))
             {
-                // Scaled down blur radius for a tighter, thinner glow
                 for (int i = glowLayers; i >= 1; i--)
                 {
                     float width = strokeWidth + (i * 2.0f);
