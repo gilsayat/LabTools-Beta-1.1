@@ -15,6 +15,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;  
 using System.Security.Cryptography;  
 using System.Runtime.InteropServices;  
+using System.Diagnostics;
   
 // ========================================================================  
 // LabTools-Beta - Laboratory Workflow Automation System  
@@ -25,13 +26,45 @@ namespace LabTools
 {  
     static class Program  
     {  
+        private static Mutex? singleInstanceMutex;
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        private const int SW_RESTORE = 9;
+
         [STAThread]  
         static void Main()  
         {  
+            // Single-instance check: only allow one window of LabTools to run at a time
+            bool createdNew;
+            singleInstanceMutex = new Mutex(true, "LabTools_Beta_SingleInstance_Mutex_GilSayat", out createdNew);
+            if (!createdNew)
+            {
+                try
+                {
+                    Process current = Process.GetCurrentProcess();
+                    foreach (Process proc in Process.GetProcessesByName(current.ProcessName))
+                    {
+                        if (proc.Id != current.Id && proc.MainWindowHandle != IntPtr.Zero)
+                        {
+                            ShowWindow(proc.MainWindowHandle, SW_RESTORE);
+                            SetForegroundWindow(proc.MainWindowHandle);
+                            break;
+                        }
+                    }
+                }
+                catch { }
+                return;
+            }
+
             Application.EnableVisualStyles();  
             Application.SetCompatibleTextRenderingDefault(false);  
 
-            // Run Two-Stage Splash Screen first
+            // Run 1.0-Second Two-Stage Splash Screen first
             using (var splash = new SplashForm())
             {
                 splash.ShowDialog();
@@ -39,6 +72,8 @@ namespace LabTools
 
             // Launch Main Application immediately after animation completes
             Application.Run(new MainForm());  
+
+            GC.KeepAlive(singleInstanceMutex);
         }  
   
         // ========================================================================  
@@ -3375,16 +3410,19 @@ namespace LabTools
     }  
 
     // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (CLEAN FAST FADE)  
+    // 1.0-SECOND TWO-STAGE SPLASH SCREEN ANIMATOR (0.5s PER PNG, 20ms FADE)  
     // ========================================================================  
     public class SplashForm : Form
     {
         private Bitmap? stage1Image;
         private Bitmap? stage2Image;
+        private Bitmap? canvasBitmap;
         private System.Windows.Forms.Timer animTimer;
-        private int tickCounter = 0;
-        // 2000ms total runtime (1000ms Stage 1, 1000ms Stage 2) at 10ms intervals
-        private const int TotalTicks = 200; 
+        private Stopwatch stopwatch = new Stopwatch();
+
+        private const int StageDurationMs = 500; // 0.5 seconds per PNG
+        private const int TotalDurationMs = 1000; // 1.0 second total
+        private const int FadeDurationMs = 20;    // 20ms fast fade in/out
 
         public SplashForm()
         {
@@ -3392,6 +3430,8 @@ namespace LabTools
             this.StartPosition = FormStartPosition.CenterScreen;
             this.Size = new Size(960, 540); 
             this.TopMost = true;
+
+            canvasBitmap = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppArgb);
 
             try
             {
@@ -3425,6 +3465,7 @@ namespace LabTools
         private void CloseSplash()
         {
             animTimer?.Stop();
+            stopwatch.Stop();
             this.DialogResult = DialogResult.OK;
             this.Close();
         }
@@ -3432,14 +3473,14 @@ namespace LabTools
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            stopwatch.Start();
+            RenderLayeredWindow();
             animTimer.Start();
         }
 
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
-            tickCounter++;
-
-            if (tickCounter > TotalTicks)
+            if (stopwatch.ElapsedMilliseconds >= TotalDurationMs)
             {
                 CloseSplash();
                 return;
@@ -3449,50 +3490,52 @@ namespace LabTools
 
         private void RenderLayeredWindow()
         {
-            using (Bitmap memBitmap = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppArgb))
+            if (canvasBitmap == null) return;
+
+            long elapsed = stopwatch.ElapsedMilliseconds;
+            float alpha1 = 0f;
+            float alpha2 = 0f;
+
+            // Stage 1: 0ms to 500ms (20ms fade in, 460ms hold, 20ms fade out)
+            if (elapsed < StageDurationMs)
             {
-                using (Graphics g = Graphics.FromImage(memBitmap))
-                {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    g.CompositingQuality = CompositingQuality.HighQuality;
-
-                    float alpha1 = 0f;
-                    float alpha2 = 0f;
-
-                    // Stage 1 (Ticks 1 - 100): Exactly 1.0 second
-                    if (tickCounter <= 100)
-                    {
-                        // 100ms fade in (10 ticks), 800ms full hold (ticks 11-90), 100ms fade out (ticks 91-100)
-                        if (tickCounter <= 10) alpha1 = tickCounter / 10f;
-                        else if (tickCounter <= 90) alpha1 = 1f;
-                        else alpha1 = Math.Max(0f, 1f - ((tickCounter - 90) / 10f));
-                    }
-                    // Stage 2 (Ticks 101 - 200): Exactly 1.0 second (Starts after Stage 1 hits 0)
-                    else
-                    {
-                        int t2 = tickCounter - 100;
-                        // 100ms fade in (10 ticks), 800ms full hold (ticks 11-90), 100ms fade out (ticks 91-100)
-                        if (t2 <= 10) alpha2 = t2 / 10f;
-                        else if (t2 <= 90) alpha2 = 1f;
-                        else alpha2 = Math.Max(0f, 1f - ((t2 - 90) / 10f));
-                    }
-
-                    // Draw Stage 1 centered with clean per-pixel alpha (No glow lines)
-                    if (stage1Image != null && alpha1 > 0.001f)
-                    {
-                        DrawCenteredImage(g, stage1Image, alpha1);
-                    }
-
-                    // Draw Stage 2 centered with clean per-pixel alpha (No glow lines)
-                    if (stage2Image != null && alpha2 > 0.001f)
-                    {
-                        DrawCenteredImage(g, stage2Image, alpha2);
-                    }
-                }
-                
-                SetBitmap(memBitmap);
+                if (elapsed < FadeDurationMs)
+                    alpha1 = (float)elapsed / FadeDurationMs;
+                else if (elapsed < (StageDurationMs - FadeDurationMs))
+                    alpha1 = 1f;
+                else
+                    alpha1 = Math.Max(0f, 1f - ((float)(elapsed - (StageDurationMs - FadeDurationMs)) / FadeDurationMs));
             }
+            // Stage 2: 500ms to 1000ms (Starts only after Stage 1 is 100% gone)
+            else if (elapsed < TotalDurationMs)
+            {
+                long t2 = elapsed - StageDurationMs;
+                if (t2 < FadeDurationMs)
+                    alpha2 = (float)t2 / FadeDurationMs;
+                else if (t2 < (StageDurationMs - FadeDurationMs))
+                    alpha2 = 1f;
+                else
+                    alpha2 = Math.Max(0f, 1f - ((float)(t2 - (StageDurationMs - FadeDurationMs)) / FadeDurationMs));
+            }
+
+            using (Graphics g = Graphics.FromImage(canvasBitmap))
+            {
+                g.Clear(Color.FromArgb(0, 0, 0, 0));
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.CompositingQuality = CompositingQuality.HighQuality;
+
+                if (stage1Image != null && alpha1 > 0.001f)
+                {
+                    DrawCenteredImage(g, stage1Image, alpha1);
+                }
+                else if (stage2Image != null && alpha2 > 0.001f)
+                {
+                    DrawCenteredImage(g, stage2Image, alpha2);
+                }
+            }
+
+            SetBitmap(canvasBitmap);
         }
 
         private void DrawCenteredImage(Graphics g, Bitmap bmp, float opacity)
@@ -3562,6 +3605,7 @@ namespace LabTools
             animTimer?.Dispose();
             stage1Image?.Dispose();
             stage2Image?.Dispose();
+            canvasBitmap?.Dispose();
             base.OnFormClosed(e);
         }
     }
