@@ -30,6 +30,13 @@ namespace LabTools
         {  
             Application.EnableVisualStyles();  
             Application.SetCompatibleTextRenderingDefault(false);  
+
+            // Run the two-stage Adobe-inspired splash sequence on boot
+            using (var splash = new SplashForm())
+            {
+                splash.ShowDialog();
+            }
+
             Application.Run(new MainForm());  
         }  
   
@@ -75,7 +82,7 @@ namespace LabTools
             }  
             return Array.Empty<string>();  
         }  
-    }  
+    }
   
     public class MainForm : Form  
     {  
