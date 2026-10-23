@@ -24,7 +24,7 @@ using System.Runtime.InteropServices;
 namespace LabTools  
 {  
     static class Program  
-    {  
+   {  
         [STAThread]  
         static void Main()  
         {  
