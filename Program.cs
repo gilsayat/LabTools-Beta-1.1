@@ -3422,7 +3422,7 @@ namespace LabTools
 
         private const int StageDurationMs = 750; // 0.5 seconds per PNG
         private const int TotalDurationMs = 1500; // 1.0 second total
-        private const int FadeDurationMs = 20;    // 20ms fast fade in/out
+        private const int FadeDurationMs = 60;    // 20ms fast fade in/out
 
         public SplashForm()
         {
