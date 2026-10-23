@@ -2766,39 +2766,38 @@ namespace LabTools
         }  
     }  
 
-    // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (6-SECOND DURATION)  
+ // ========================================================================  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (4-SEC, LARGE, CROSSFADE)  
     // ========================================================================  
     public class SplashForm : Form
     {
-        private Image? stage1Image;
-        private Image? stage2Image;
+        private Bitmap? stage1Image;
+        private Bitmap? stage2Image;
         private System.Windows.Forms.Timer animTimer;
-        private int currentStage = 1;
-        private double currentOpacity = 0.0;
         private int tickCounter = 0;
+        private const int TotalTicks = 266; // Exactly 4 seconds total duration at 15ms interval
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(880, 560); // Scaled up for a larger presentation
+            this.Size = new Size(960, 600); // Larger, prominent canvas size
             this.BackColor = Color.Magenta; // Transparent background key color
             this.TransparencyKey = Color.Magenta; 
             this.TopMost = true;
             this.DoubleBuffered = true;
-            this.Opacity = 0.0;
+            this.Opacity = 1.0; // Handled via internal alpha color matrix for seamless blending
 
             try
             {
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 
-                using (var stream1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.jpg"))
+                using (var stream1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.png"))
                 {
                     if (stream1 != null) stage1Image = new Bitmap(stream1);
                 }
 
-                using (var stream2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.jpg"))
+                using (var stream2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.png"))
                 {
                     if (stream2 != null) stage2Image = new Bitmap(stream2);
                 }
@@ -2827,42 +2826,11 @@ namespace LabTools
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
             tickCounter++;
-
-            // Total 6 seconds breakdown at 15ms interval (400 total ticks):
-            // Ticks 0 - 40   (~0.6s): Fade In (Stage 1)
-            // Ticks 41 - 200 (~2.4s): Hold Stage 1
-            // Ticks 201      : Switch to Stage 2 ("Lt")
-            // Ticks 201 - 360(~2.4s): Hold Stage 2
-            // Ticks 361 - 400(~0.6s): Fade Out
-
-            if (tickCounter <= 40)
-            {
-                currentStage = 1;
-                currentOpacity = (double)tickCounter / 40.0; // 0.0 -> 1.0
-            }
-            else if (tickCounter <= 200)
-            {
-                currentStage = 1;
-                currentOpacity = 1.0;
-            }
-            else if (tickCounter <= 360)
-            {
-                currentStage = 2;
-                currentOpacity = 1.0;
-            }
-            else if (tickCounter <= 400)
-            {
-                currentStage = 2;
-                int fadeOutTicks = tickCounter - 360;
-                currentOpacity = 1.0 - ((double)fadeOutTicks / 40.0); // 1.0 -> 0.0
-            }
-            else
+            if (tickCounter > TotalTicks)
             {
                 CloseSplash();
                 return;
             }
-
-            this.Opacity = Math.Max(0.0, Math.Min(1.0, currentOpacity));
             this.Invalidate();
         }
 
@@ -2873,17 +2841,67 @@ namespace LabTools
             e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            Image? currentImg = (currentStage == 1) ? stage1Image : stage2Image;
-            if (currentImg != null)
+            // 4-Second Breakdown (266 total ticks at 15ms):
+            // Ticks 0 - 33   (~0.5s): Stage 1 Fade-In (0.0 -> 1.0)
+            // Ticks 34 - 113 (~1.2s): Stage 1 Hold (1.0)
+            // Ticks 114 - 153(~0.6s): Smooth Crossfade (Stage 1: 1.0->0.0, Stage 2: 0.0->1.0)
+            // Ticks 154 - 233(~1.2s): Stage 2 Hold (1.0)
+            // Ticks 234 - 266(~0.5s): Stage 2 Fade-Out (1.0 -> 0.0)
+
+            float alpha1 = 0f;
+            float alpha2 = 0f;
+
+            if (tickCounter <= 33)
             {
-                e.Graphics.DrawImage(currentImg, 0, 0, this.Width, this.Height);
+                alpha1 = (float)tickCounter / 33f;
+                alpha2 = 0f;
+            }
+            else if (tickCounter <= 113)
+            {
+                alpha1 = 1f;
+                alpha2 = 0f;
+            }
+            else if (tickCounter <= 153)
+            {
+                float progress = (float)(tickCounter - 113) / 40f;
+                alpha1 = 1f - progress; // Melts away
+                alpha2 = progress;      // Melts in
+            }
+            else if (tickCounter <= 233)
+            {
+                alpha1 = 0f;
+                alpha2 = 1f;
             }
             else
             {
-                using (Font f = new Font("Segoe UI", 16, FontStyle.Bold))
-                {
-                    e.Graphics.DrawString("Loading LabTools...", f, Brushes.White, new PointF(300, 250));
-                }
+                alpha1 = 0f;
+                alpha2 = 1f - ((float)(tickCounter - 233) / 33f);
+            }
+
+            // Draw Stage 1 centered with calculated alpha
+            if (stage1Image != null && alpha1 > 0f)
+            {
+                DrawCenteredImage(e.Graphics, stage1Image, alpha1);
+            }
+
+            // Draw Stage 2 centered with calculated alpha overlapping smoothly
+            if (stage2Image != null && alpha2 > 0f)
+            {
+                DrawCenteredImage(e.Graphics, stage2Image, alpha2);
+            }
+        }
+
+        private void DrawCenteredImage(Graphics g, Bitmap bmp, float opacity)
+        {
+            using (var attributes = new ImageAttributes())
+            {
+                var matrix = new ColorMatrix();
+                matrix.Matrix33 = opacity; // Sets transparency channel
+                attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+
+                // Perfectly centered scaling to fit the larger form canvas bounds
+                Rectangle destRect = new Rectangle(0, 0, this.Width, this.Height);
+                g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, attributes);
             }
         }
 
@@ -2894,5 +2912,6 @@ namespace LabTools
             stage2Image?.Dispose();
             base.OnFormClosed(e);
         }
+    }
     }
 }
