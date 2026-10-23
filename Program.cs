@@ -2913,5 +2913,4 @@ namespace LabTools
             base.OnFormClosed(e);
         }
     }
-    }
 }
