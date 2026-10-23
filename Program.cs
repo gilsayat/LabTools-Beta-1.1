@@ -64,7 +64,7 @@ namespace LabTools
             Application.EnableVisualStyles();  
             Application.SetCompatibleTextRenderingDefault(false);  
 
-            // Run 1.0-Second Two-Stage Splash Screen first
+            // Run 1.5-Second Two-Stage Splash Screen first
             using (var splash = new SplashForm())
             {
                 splash.ShowDialog();
@@ -161,6 +161,7 @@ namespace LabTools
         };
   
         private AppConfig config = null!;  
+        private string hubAppCanvasFolder = @"Z:\PixelsOrder\HubAppCanvas";
         private TextBox txtSearch = null!;  
         private Button btnFind = null!;  
         private Button btnCancelSearch = null!;  
@@ -186,13 +187,17 @@ namespace LabTools
         private Label lblLastOrder = null!;          
         private Label lblFilesFound = null!;  
         private ProgressBar progressBar = null!;  
-        private ComboBox cmbAspectCrop = null!;  
+
+        private Label lblHubCanvasHeader = null!;
+        private ListBox lstHubCanvasOrders = null!;
+        private readonly Dictionary<string, Bitmap> hubThumbCache = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
 
         private Label lblCabinOrdersHeader = null!;
         private ListBox lstCabinOrders = null!;
   
         private FileSystemWatcher? folderWatcher;  
         private FileSystemWatcher? printshopWatcher;  
+        private FileSystemWatcher? hubCanvasWatcher;
         private System.Windows.Forms.Timer? flashTimer;  
         private int flashCounter = 0;  
         private bool isSyncingCabin = false;  
@@ -292,17 +297,43 @@ namespace LabTools
             config.CurrentVoyage = voyage;  
             config.Save();  
         }  
+
+        private void LoadHubAppCanvasFolderSetting()
+        {
+            try
+            {
+                if (File.Exists("HubAppCanvasFolder.txt"))
+                {
+                    string saved = Program.SafeReadAllLines("HubAppCanvasFolder.txt").FirstOrDefault()?.Trim() ?? "";
+                    if (!string.IsNullOrWhiteSpace(saved))
+                        hubAppCanvasFolder = saved;
+                }
+            }
+            catch { }
+        }
+
+        private void SaveHubAppCanvasFolderSetting()
+        {
+            try
+            {
+                Program.SafeWriteAllText("HubAppCanvasFolder.txt", hubAppCanvasFolder);
+            }
+            catch { }
+        }
   
         public MainForm()  
         {  
             this.DoubleBuffered = true;   
               
             config = AppConfig.Load();  
+            LoadHubAppCanvasFolderSetting();
             InitializeCustomComponent();  
             LoadMediaSizes();
             LoadCustomTemplates();  
             SetupFolderWatcher();  
             SetupPrintshopWatcher();  
+            SetupHubCanvasWatcher();
+            RefreshHubCanvasOrdersList();
             UpdateNextCanvasNumber();  
             CheckMachineHealthAsync();  
             CheckLatestDownloadOrder();  
@@ -569,26 +600,55 @@ namespace LabTools
   
             lblStatusLeft = new Label() { Text = "Ready", Location = new Point(20, 765), Width = 560, Height = 30, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11, FontStyle.Bold) };  
   
+            // ========================================================================
+            // RIGHT PANEL (PREVIEW -> DIGITAL ORDER MONITOR -> HUBAPP CANVAS -> CABIN ORDERS)
+            // ========================================================================
             Panel rightPanel = new Panel() { Location = new Point(600, 55), Width = 310, Height = 745, BackColor = panelBackground };  
   
             picLogo = new PictureBox() { Location = new Point(15, 15), Width = 280, Height = 210, BackColor = Color.FromArgb(18, 19, 22), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
   
-            Label lblCrop = new Label() { Text = "Aspect Ratio Crop Guide:", Location = new Point(15, 235), ForeColor = textWhite, AutoSize = true, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
-            cmbAspectCrop = new ComboBox() { Location = new Point(15, 255), Width = 280, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList };  
-            cmbAspectCrop.Items.AddRange(new string[] { "Full Frame (No Crop)", "8x10 Ratio (4:5)", "4x6 Ratio (2:3)", "5x7 Ratio (5:7)", "16x20 Canvas (+1.5in Wrap)" });  
-            cmbAspectCrop.SelectedIndex = 0;  
-            cmbAspectCrop.SelectedIndexChanged += (s, e) => { PreviewSelectedImageSafe(); };  
-  
-            Panel alertBox = new Panel() { Location = new Point(15, 310), Width = 280, Height = 95, BackColor = Color.FromArgb(30, 31, 35), BorderStyle = BorderStyle.FixedSingle };  
-            Label lblOrderHeader = new Label() { Text = "DIGITAL ORDER MONITOR", Location = new Point(5, 8), Width = 268, ForeColor = Color.LightGray, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };  
-            lblLastOrder = new Label() { Text = "Waiting for orders...", Location = new Point(5, 35), Width = 268, Height = 45, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
+            // 1. DIGITAL ORDER MONITOR (Moved up into the old Crop Guide space)
+            Panel alertBox = new Panel() { Location = new Point(15, 232), Width = 280, Height = 85, BackColor = Color.FromArgb(30, 31, 35), BorderStyle = BorderStyle.FixedSingle };  
+            Label lblOrderHeader = new Label() { Text = "DIGITAL ORDER MONITOR", Location = new Point(5, 6), Width = 268, ForeColor = Color.LightGray, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };  
+            lblLastOrder = new Label() { Text = "Waiting for orders...", Location = new Point(5, 28), Width = 268, Height = 48, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
             alertBox.Controls.Add(lblOrderHeader);  
             alertBox.Controls.Add(lblLastOrder);  
 
-            // CABIN ORDERS SECTION
-            lblCabinOrdersHeader = new Label() { Text = "CABIN ORDERS (0)", Location = new Point(15, 415), Width = 280, Height = 20, ForeColor = Color.FromArgb(130, 220, 210), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
-            lstCabinOrders = new ListBox() { Location = new Point(15, 438), Width = 280, Height = 245, BackColor = Color.FromArgb(30, 31, 35), ForeColor = textWhite, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
+            // 2. HUBAPP CANVAS ORDER MONITOR (Middle Box with Thumbnails)
+            lblHubCanvasHeader = new Label() { Text = "HUBAPP CANVAS ORDERS (0)", Location = new Point(15, 324), Width = 280, Height = 18, ForeColor = Color.FromArgb(130, 220, 210), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+            lstHubCanvasOrders = new ListBox()
+            {
+                Location = new Point(15, 344),
+                Width = 280,
+                Height = 165,
+                BackColor = Color.FromArgb(30, 31, 35),
+                ForeColor = textWhite,
+                Font = new Font("Segoe UI", 8.5f),
+                BorderStyle = BorderStyle.FixedSingle,
+                DrawMode = DrawMode.OwnerDrawFixed,
+                ItemHeight = 36
+            };
+            lstHubCanvasOrders.DrawItem += LstHubCanvasOrders_DrawItem;
+            lstHubCanvasOrders.SelectedIndexChanged += (s, e) =>
+            {
+                if (lstHubCanvasOrders.SelectedItem is HubCanvasItem item)
+                {
+                    PreviewImagePathInLogoBox(item.FullPath);
+                    SetStatus($"HubApp Canvas: Cabin {item.Cabin} • {item.CanvasSize} • {item.PhotoName} ({item.Seller}) - Double-click to post.");
+                }
+            };
+            lstHubCanvasOrders.DoubleClick += async (s, e) =>
+            {
+                if (lstHubCanvasOrders.SelectedItem is HubCanvasItem item)
+                {
+                    await PromptAndPostHubCanvasOrderAsync(item);
+                }
+            };
+
+            // 3. CABIN ORDERS SECTION (Bottom Box with Reduced Height)
+            lblCabinOrdersHeader = new Label() { Text = "CABIN ORDERS (0)", Location = new Point(15, 516), Width = 280, Height = 18, ForeColor = Color.FromArgb(130, 220, 210), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
+            lstCabinOrders = new ListBox() { Location = new Point(15, 536), Width = 280, Height = 152, BackColor = Color.FromArgb(30, 31, 35), ForeColor = textWhite, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
             lstCabinOrders.SelectedIndexChanged += (s, e) => {
                 if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
                 {
@@ -611,9 +671,9 @@ namespace LabTools
             lblStatusRight = new Label() { Text = "Ready", Location = new Point(15, 695), Width = 280, Height = 30, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11, FontStyle.Bold) };  
   
             rightPanel.Controls.Add(picLogo);  
-            rightPanel.Controls.Add(lblCrop);  
-            rightPanel.Controls.Add(cmbAspectCrop);  
             rightPanel.Controls.Add(alertBox);  
+            rightPanel.Controls.Add(lblHubCanvasHeader);
+            rightPanel.Controls.Add(lstHubCanvasOrders);
             rightPanel.Controls.Add(lblCabinOrdersHeader);
             rightPanel.Controls.Add(lstCabinOrders);
             rightPanel.Controls.Add(lblStatusRight);  
@@ -655,6 +715,323 @@ namespace LabTools
             this.Controls.Add(lblStatusLeft);  
             this.Controls.Add(rightPanel);  
         }  
+
+        // ========================================================================
+        // HUBAPP CANVAS ORDER MONITOR, THUMBNAIL RENDERER & AUTO-POSTER
+        // ========================================================================
+        private void SetupHubCanvasWatcher()
+        {
+            try
+            {
+                hubCanvasWatcher?.Dispose();
+                if (!string.IsNullOrWhiteSpace(hubAppCanvasFolder))
+                {
+                    Directory.CreateDirectory(hubAppCanvasFolder);
+                    hubCanvasWatcher = new FileSystemWatcher(hubAppCanvasFolder)
+                    {
+                        IncludeSubdirectories = false,
+                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
+                    };
+
+                    FileSystemEventHandler onChange = (s, e) =>
+                    {
+                        if (!IsDisposed && IsHandleCreated)
+                            try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
+                    };
+
+                    hubCanvasWatcher.Created += onChange;
+                    hubCanvasWatcher.Deleted += onChange;
+                    hubCanvasWatcher.Renamed += (s, e) =>
+                    {
+                        if (!IsDisposed && IsHandleCreated)
+                            try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
+                    };
+                    hubCanvasWatcher.EnableRaisingEvents = true;
+                }
+            }
+            catch { }
+        }
+
+        private void RefreshHubCanvasOrdersList()
+        {
+            try
+            {
+                var items = new List<HubCanvasItem>();
+                if (!string.IsNullOrWhiteSpace(hubAppCanvasFolder) && Directory.Exists(hubAppCanvasFolder))
+                {
+                    var files = Directory.EnumerateFiles(hubAppCanvasFolder, "*.*", SearchOption.TopDirectoryOnly)
+                                         .Where(f => ImageExtensions.Contains(Path.GetExtension(f)))
+                                         .OrderByDescending(f => File.GetCreationTime(f));
+
+                    foreach (string file in files)
+                    {
+                        items.Add(ParseHubCanvasFile(file));
+                    }
+                }
+
+                // Clean up thumbnails for removed files
+                var activePaths = new HashSet<string>(items.Select(i => i.FullPath), StringComparer.OrdinalIgnoreCase);
+                foreach (var key in hubThumbCache.Keys.Where(k => !activePaths.Contains(k)).ToList())
+                {
+                    hubThumbCache[key]?.Dispose();
+                    hubThumbCache.Remove(key);
+                }
+
+                lstHubCanvasOrders.BeginUpdate();
+                lstHubCanvasOrders.Items.Clear();
+                foreach (var item in items)
+                {
+                    lstHubCanvasOrders.Items.Add(item);
+                }
+                lstHubCanvasOrders.EndUpdate();
+
+                lblHubCanvasHeader.Text = $"HUBAPP CANVAS ORDERS ({items.Count})";
+            }
+            catch { }
+        }
+
+        private static HubCanvasItem ParseHubCanvasFile(string fullPath)
+        {
+            string fileName = Path.GetFileName(fullPath);
+            string baseName = Path.GetFileNameWithoutExtension(fullPath);
+            string[] parts = baseName.Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries);
+
+            string cabin = "";
+            string size = "16x20";
+            string photoName = baseName;
+            string seller = "APP";
+
+            // Expected format: 9245_16x20_P057677026_APP.jpg
+            if (parts.Length >= 4)
+            {
+                cabin = parts[0].Trim();
+                size = parts[1].Trim();
+                seller = parts[parts.Length - 1].Trim();
+                photoName = string.Join("_", parts.Skip(2).Take(parts.Length - 3)).Trim();
+            }
+            else if (parts.Length == 3)
+            {
+                cabin = parts[0].Trim();
+                size = parts[1].Trim();
+                photoName = parts[2].Trim();
+                seller = "APP";
+            }
+            else if (parts.Length == 2)
+            {
+                cabin = parts[0].Trim();
+                photoName = parts[1].Trim();
+                seller = "APP";
+            }
+
+            return new HubCanvasItem
+            {
+                FileName = fileName,
+                FullPath = fullPath,
+                Cabin = cabin,
+                CanvasSize = size,
+                PhotoName = photoName,
+                Seller = string.IsNullOrWhiteSpace(seller) ? "APP" : seller
+            };
+        }
+
+        private Bitmap? GetOrCreateHubThumbnail(string path)
+        {
+            if (hubThumbCache.TryGetValue(path, out Bitmap? cached) && cached != null)
+                return cached;
+
+            try
+            {
+                if (!File.Exists(path)) return null;
+                byte[] bytes = File.ReadAllBytes(path);
+                using (var ms = new MemoryStream(bytes))
+                using (var img = Image.FromStream(ms))
+                {
+                    Bitmap thumb = new Bitmap(40, 30);
+                    using (Graphics g = Graphics.FromImage(thumb))
+                    {
+                        g.Clear(Color.FromArgb(18, 19, 22));
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        double r = Math.Min(40.0 / img.Width, 30.0 / img.Height);
+                        int w = Math.Max(1, (int)(img.Width * r));
+                        int h = Math.Max(1, (int)(img.Height * r));
+                        g.DrawImage(img, (40 - w) / 2, (30 - h) / 2, w, h);
+                    }
+                    hubThumbCache[path] = thumb;
+                    return thumb;
+                }
+            }
+            catch { return null; }
+        }
+
+        private void LstHubCanvasOrders_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= lstHubCanvasOrders.Items.Count) return;
+
+            bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Color bgColor = isSelected ? accentBlue : Color.FromArgb(30, 31, 35);
+
+            using (Brush bgBrush = new SolidBrush(bgColor))
+            {
+                e.Graphics.FillRectangle(bgBrush, e.Bounds);
+            }
+
+            if (lstHubCanvasOrders.Items[e.Index] is HubCanvasItem item)
+            {
+                Bitmap? thumb = GetOrCreateHubThumbnail(item.FullPath);
+                int thumbX = e.Bounds.X + 4;
+                int thumbY = e.Bounds.Y + (e.Bounds.Height - 30) / 2;
+
+                if (thumb != null)
+                {
+                    e.Graphics.DrawImage(thumb, thumbX, thumbY, 40, 30);
+                    e.Graphics.DrawRectangle(Pens.DimGray, thumbX, thumbY, 40, 30);
+                }
+
+                Rectangle textRect = new Rectangle(e.Bounds.X + 50, e.Bounds.Y, e.Bounds.Width - 54, e.Bounds.Height);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    item.FileName,
+                    e.Font ?? this.Font,
+                    textRect,
+                    Color.White,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
+                );
+            }
+
+            e.DrawFocusRectangle();
+        }
+
+        private async Task PromptAndPostHubCanvasOrderAsync(HubCanvasItem item)
+        {
+            try
+            {
+                if (!File.Exists(item.FullPath))
+                {
+                    MessageBox.Show("This canvas file is no longer in the HubApp Canvas Order folder.", "File Not Found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    RefreshHubCanvasOrdersList();
+                    return;
+                }
+
+                UpdateNextCanvasNumber();
+                string numPrefix = nextCanvasNumber.ToString("D3");
+                string cabin = string.IsNullOrWhiteSpace(item.Cabin) ? txtCanvasCabin.Text.Trim() : item.Cabin;
+                string size = string.IsNullOrWhiteSpace(item.CanvasSize) ? "16x20" : item.CanvasSize;
+                string seller = string.IsNullOrWhiteSpace(item.Seller) ? "APP" : item.Seller;
+                string photoName = string.IsNullOrWhiteSpace(item.PhotoName) ? Path.GetFileNameWithoutExtension(item.FileName) : item.PhotoName;
+
+                // Sync parsed info into UI fields automatically
+                if (!string.IsNullOrEmpty(cabin)) txtCabin.Text = cabin;
+                if (!cmbCanvasSize.Items.Contains(size)) cmbCanvasSize.Items.Add(size);
+                cmbCanvasSize.SelectedItem = size;
+                txtSeller.Text = seller;
+
+                DialogResult confirmPost = MessageBox.Show(
+                    $"Do you want to post this HubApp Canvas Order?\n\n" +
+                    $"Canvas No.: {numPrefix}\n" +
+                    $"Cabin: {cabin}\n" +
+                    $"Canvas Size: {size}\n" +
+                    $"Photo File: {photoName}\n" +
+                    $"Seller: {seller}",
+                    "Post HubApp Canvas Order",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (confirmPost != DialogResult.Yes) return;
+
+                if (string.IsNullOrWhiteSpace(cabin))
+                {
+                    MessageBox.Show("Could not detect a Cabin number from the file name. Please enter a Cabin number first.", "Missing Cabin", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                string targetDir = config.PrintshopFolder;
+                Directory.CreateDirectory(targetDir);
+
+                string ext = Path.GetExtension(item.FullPath);
+                if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+
+                string newFileName = $"{numPrefix}_{cabin}_{size}_{photoName}_{seller}{ext}";
+                string printshopDestPath = Path.Combine(targetDir, newFileName);
+
+                // 1. Copy to Printshop Folder
+                File.Copy(item.FullPath, printshopDestPath, true);
+
+                // 2. Move original photo to HubApp Canvas Order\Done subfolder
+                string doneDir = Path.Combine(hubAppCanvasFolder, "Done");
+                Directory.CreateDirectory(doneDir);
+                string doneFilePath = Path.Combine(doneDir, item.FileName);
+
+                if (hubThumbCache.TryGetValue(item.FullPath, out Bitmap? cachedThumb))
+                {
+                    cachedThumb?.Dispose();
+                    hubThumbCache.Remove(item.FullPath);
+                }
+
+                File.Move(item.FullPath, doneFilePath, true);
+
+                nextCanvasNumber++;
+                UpdateNextCanvasNumber();
+                RefreshHubCanvasOrdersList();
+                SetStatus($"Posted Canvas No. {numPrefix} ({newFileName}) and moved original to Done.");
+
+                // 3. Prompt to print 8x10 copy as well
+                DialogResult printDr = MessageBox.Show(
+                    $"Successfully posted Canvas No. {numPrefix} to Printshop and moved original to Done.\n\n" +
+                    $"Do you want to print the picture posted as an 8x10 print as well?",
+                    "Canvas Order Created",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (printDr == DialogResult.Yes)
+                {
+                    string machineTargetFolder = config.MachineC;
+                    string selectedMachine = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString()! : "Machine C";
+
+                    if (selectedMachine == "Machine A") machineTargetFolder = config.MachineA;
+                    else if (selectedMachine == "Machine B") machineTargetFolder = config.MachineB;
+                    else if (selectedMachine == "Machine C") machineTargetFolder = config.MachineC;
+                    else if (selectedMachine == "Machine D") machineTargetFolder = config.MachineD;
+
+                    if (string.IsNullOrWhiteSpace(machineTargetFolder))
+                        throw new InvalidOperationException("The target folder for " + selectedMachine + " is not configured.");
+
+                    Directory.CreateDirectory(machineTargetFolder);
+
+                    string canvasNumbersStr = "Canvas NO " + numPrefix;
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.AppendLine("OrderReferenceID=");
+                    sb.AppendLine("OrderFirstName = " + canvasNumbersStr);
+                    sb.AppendLine("OrderLastName = " + seller);
+                    sb.AppendLine("ExtCabin = " + cabin);
+                    sb.AppendLine("ExtFolio = ");
+                    sb.AppendLine();
+                    sb.AppendLine("Qty=1");
+                    sb.AppendLine("Size=8x10");
+                    sb.AppendLine("PrintName=8x10");
+                    sb.AppendLine("Media=Glossy");
+                    sb.AppendLine("FilePath=" + doneFilePath);
+                    sb.AppendLine();
+
+                    string orderId = GetNext7CharOrderId();
+                    string tempFilePath = Path.Combine(machineTargetFolder, orderId + ".tmp");
+                    string finalFilePath = Path.Combine(machineTargetFolder, orderId + ".txt");
+
+                    await Task.Run(() =>
+                    {
+                        Program.SafeWriteAllText(tempFilePath, sb.ToString());
+                        File.Move(tempFilePath, finalFilePath);
+                    });
+
+                    LogOrderToAuditHistory(orderId, cabin, selectedMachine, "8x10", 1, seller, new List<string> { item.FileName });
+                    SetStatus($"Dispatched 8x10 canvas copy (Order {orderId}) to {selectedMachine}.");
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("HubApp Canvas Error: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
 
         // ========================================================================
         // CHECK ORDER IDS (RECURSIVE SCAN ACROSS ORDERS FOLDER & SUBFOLDERS)
@@ -1862,91 +2239,57 @@ namespace LabTools
         }
 
         // ========================================================================  
-        // PREVIEW & CROP  
+        // PREVIEW  
         // ========================================================================  
         private void PreviewSelectedImageSafe()  
         {  
             if (lstFiles.SelectedItem is FileItem item && File.Exists(item.FullPath))  
             {  
-                try  
-                {  
-                    byte[] fileBytes = File.ReadAllBytes(item.FullPath);  
-                    using (var ms = new MemoryStream(fileBytes))  
-                    using (var originalImg = Image.FromStream(ms))  
-                    {  
-                        Bitmap thumb = new Bitmap(280, 210);  
-                        using (Graphics g = Graphics.FromImage(thumb))  
-                        {  
-                            g.Clear(Color.FromArgb(18, 19, 22));  
-                            g.InterpolationMode = InterpolationMode.HighQualityBicubic;   
-                            g.PixelOffsetMode = PixelOffsetMode.HighQuality;  
-                            g.SmoothingMode = SmoothingMode.HighQuality;  
-  
-                            double ratioX = 280.0 / originalImg.Width;  
-                            double ratioY = 210.0 / originalImg.Height;  
-                            double ratio = Math.Min(ratioX, ratioY);  
-  
-                            int newWidth = (int)(originalImg.Width * ratio);  
-                            int newHeight = (int)(originalImg.Height * ratio);  
-                            int posX = (280 - newWidth) / 2;  
-                            int posY = (210 - newHeight) / 2;  
-  
-                            g.DrawImage(originalImg, posX, posY, newWidth, newHeight);  
-  
-                            string cropSelection = cmbAspectCrop?.SelectedItem?.ToString() ?? "Full Frame";  
-                            if (cropSelection != "Full Frame (No Crop)")  
-                                DrawAspectCropGuide(g, posX, posY, newWidth, newHeight, cropSelection);  
-                        }  
-  
-                        Image oldImg = picLogo.Image;  
-                        picLogo.Image = thumb;  
-                        oldImg?.Dispose();  
-                    }  
-                }  
-                catch { ResetLogoPreview(); }  
+                PreviewImagePathInLogoBox(item.FullPath);
             }  
         }  
-  
-        private void DrawAspectCropGuide(Graphics g, int imgX, int imgY, int imgW, int imgH, string cropType)  
-        {  
-            float targetRatio = 1.0f;   
-            bool isCanvasWrap = false;  
-  
-            if (cropType.StartsWith("8x10")) targetRatio = 8.0f / 10.0f;  
-            else if (cropType.StartsWith("4x6")) targetRatio = 4.0f / 6.0f;  
-            else if (cropType.StartsWith("5x7")) targetRatio = 5.0f / 7.0f;  
-            else if (cropType.StartsWith("16x20")) { targetRatio = 16.0f / 20.0f; isCanvasWrap = true; }  
-  
-            if (imgW > imgH && targetRatio < 1.0f) targetRatio = 1.0f / targetRatio;  
-  
-            int cropW = imgW;  
-            int cropH = (int)(cropW / targetRatio);  
-  
-            if (cropH > imgH) { cropH = imgH; cropW = (int)(cropH * targetRatio); }  
-  
-            int cropX = imgX + (imgW - cropW) / 2;  
-            int cropY = imgY + (imgH - cropH) / 2;  
-  
-            using (Brush maskBrush = new SolidBrush(Color.FromArgb(140, 0, 0, 0)))  
-            {  
-                g.FillRectangle(maskBrush, imgX, imgY, imgW, cropY - imgY);  
-                g.FillRectangle(maskBrush, imgX, cropY + cropH, imgW, (imgY + imgH) - (cropY + cropH));  
-                g.FillRectangle(maskBrush, imgX, cropY, cropX - imgX, cropH);  
-                g.FillRectangle(maskBrush, cropX + cropW, cropY, (imgX + imgW) - (cropX + cropW), cropH);  
-            }  
-  
-            using (Pen cropPen = new Pen(Color.Gold, 2f) { DashStyle = DashStyle.Dash }) g.DrawRectangle(cropPen, cropX, cropY, cropW, cropH);  
-  
-            if (isCanvasWrap)  
-            {  
-                int wrapMarginX = (int)(cropW * 0.08f);  
-                int wrapMarginY = (int)(cropH * 0.08f);  
-                using (Pen wrapPen = new Pen(Color.Cyan, 1.5f) { DashStyle = DashDotPen() })  
-                    g.DrawRectangle(wrapPen, cropX + wrapMarginX, cropY + wrapMarginY, cropW - wrapMarginX * 2, cropH - wrapMarginY * 2);  
-            }  
-        }  
-  
-        private static DashStyle DashDotPen() => DashStyle.Dot;  
+
+        private void PreviewImagePathInLogoBox(string fullPath)
+        {
+            if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+            {
+                ResetLogoPreview();
+                return;
+            }
+
+            try
+            {
+                byte[] fileBytes = File.ReadAllBytes(fullPath);
+                using (var ms = new MemoryStream(fileBytes))
+                using (var originalImg = Image.FromStream(ms))
+                {
+                    Bitmap thumb = new Bitmap(280, 210);
+                    using (Graphics g = Graphics.FromImage(thumb))
+                    {
+                        g.Clear(Color.FromArgb(18, 19, 22));
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.SmoothingMode = SmoothingMode.HighQuality;
+
+                        double ratioX = 280.0 / originalImg.Width;
+                        double ratioY = 210.0 / originalImg.Height;
+                        double ratio = Math.Min(ratioX, ratioY);
+
+                        int newWidth = (int)(originalImg.Width * ratio);
+                        int newHeight = (int)(originalImg.Height * ratio);
+                        int posX = (280 - newWidth) / 2;
+                        int posY = (210 - newHeight) / 2;
+
+                        g.DrawImage(originalImg, posX, posY, newWidth, newHeight);
+                    }
+
+                    Image? oldImg = picLogo.Image;
+                    picLogo.Image = thumb;
+                    oldImg?.Dispose();
+                }
+            }
+            catch { ResetLogoPreview(); }
+        }
   
         private void ResetLogoPreview()  
         {  
@@ -2279,7 +2622,7 @@ namespace LabTools
             Form settingsForm = new Form()  
             {  
                 Text = AppTitle + " - Settings & HotFolder Paths",  
-                Size = new Size(690, 660),  
+                Size = new Size(690, 695),  
                 StartPosition = FormStartPosition.CenterParent,  
                 BackColor = darkBackground,  
                 FormBorderStyle = FormBorderStyle.FixedDialog,  
@@ -2293,6 +2636,7 @@ namespace LabTools
             AddSettingRow(settingsForm, "Downloads Folder:", config.DownloadsFolder, ref y, (val) => config.DownloadsFolder = val);  
             AddSettingRow(settingsForm, "Bordered Prints:", string.IsNullOrWhiteSpace(config.BorderedPrintsFolder) ? @"Z:\PixelsOrder\Prints" : config.BorderedPrintsFolder, ref y, (val) => config.BorderedPrintsFolder = val);  
             AddSettingRow(settingsForm, "Printshop Folder:", config.PrintshopFolder, ref y, (val) => config.PrintshopFolder = val);  
+            AddSettingRow(settingsForm, "HubApp Canvas Order:", hubAppCanvasFolder, ref y, (val) => hubAppCanvasFolder = val);
             AddSettingRow(settingsForm, "CC Folder:", config.CCFolder, ref y, (val) => config.CCFolder = val);  
             AddSettingRow(settingsForm, "White Images:", config.DestinationForWhiteImages, ref y, (val) => config.DestinationForWhiteImages = val);  
             AddSettingRow(settingsForm, "Machine A:", config.MachineA, ref y, (val) => config.MachineA = val);  
@@ -2320,7 +2664,15 @@ namespace LabTools
             Button btnSave = new Button() { Text = "Save Settings", Location = new Point(420, y + 15), Width = 215, Height = 36, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
             btnSave.Click += (s, e) =>  
             {  
-                config.Save(); SetupPrintshopWatcher(); UpdateNextCanvasNumber(); CheckMachineHealthAsync(); CheckLatestDownloadOrder();  
+                config.Save();
+                SaveHubAppCanvasFolderSetting();
+                SetupFolderWatcher();
+                SetupPrintshopWatcher();
+                SetupHubCanvasWatcher();
+                RefreshHubCanvasOrdersList();
+                UpdateNextCanvasNumber();
+                CheckMachineHealthAsync();
+                CheckLatestDownloadOrder();  
                 MessageBox.Show("Settings and HotFolder paths saved successfully!", "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);  
                 settingsForm.Close();  
             };  
@@ -2333,7 +2685,7 @@ namespace LabTools
   
         private void AddSettingRow(Form parent, string labelName, string initialValue, ref int yPos, Action<string> onValueChanged)  
         {  
-            Label lbl = new Label() { Text = labelName, Location = new Point(20, yPos + 3), Width = 140, Height = 20, ForeColor = textWhite };  
+            Label lbl = new Label() { Text = labelName, Location = new Point(20, yPos + 3), Width = 145, Height = 20, ForeColor = textWhite };  
             TextBox txt = new TextBox() { Text = initialValue, Location = new Point(170, yPos), Width = 380, Height = 25 };  
             Button btnBrowse = new Button() { Text = "Browse", Location = new Point(560, yPos - 1), Width = 75, Height = 27, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat };  
   
@@ -2666,11 +3018,30 @@ namespace LabTools
   
         protected override void OnFormClosed(FormClosedEventArgs e)  
         {  
-            searchCts?.Cancel(); copyCts?.Cancel(); folderWatcher?.Dispose(); printshopWatcher?.Dispose(); flashTimer?.Dispose(); picLogo?.Image?.Dispose(); base.OnFormClosed(e);  
+            searchCts?.Cancel();
+            copyCts?.Cancel();
+            folderWatcher?.Dispose();
+            printshopWatcher?.Dispose();
+            hubCanvasWatcher?.Dispose();
+            flashTimer?.Dispose();
+            picLogo?.Image?.Dispose();
+            foreach (var bmp in hubThumbCache.Values) bmp?.Dispose();
+            hubThumbCache.Clear();
+            base.OnFormClosed(e);  
         }  
   
         private class FileItem { public string FileName { get; set; } = ""; public string FullPath { get; set; } = ""; public override string ToString() => FileName; }  
         private class OrderSearchResult { public bool IsOrder { get; set; } public string OrderId { get; set; } = ""; public string Cabin { get; set; } = ""; public string? Size { get; set; } public List<string> Files { get; set; } = new List<string>(); }  
+        private class HubCanvasItem
+        {
+            public string FileName { get; set; } = "";
+            public string FullPath { get; set; } = "";
+            public string Cabin { get; set; } = "";
+            public string CanvasSize { get; set; } = "16x20";
+            public string PhotoName { get; set; } = "";
+            public string Seller { get; set; } = "APP";
+            public override string ToString() => FileName;
+        }
     }  
   
     // ========================================================================  
@@ -3410,7 +3781,7 @@ namespace LabTools
     }  
 
     // ========================================================================  
-    // 1.0-SECOND TWO-STAGE SPLASH SCREEN ANIMATOR (0.5s PER PNG, 20ms FADE)  
+    // 1.5-SECOND TWO-STAGE SPLASH SCREEN ANIMATOR (0.75s PER PNG, 20ms FADE)  
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -3420,9 +3791,9 @@ namespace LabTools
         private System.Windows.Forms.Timer animTimer;
         private Stopwatch stopwatch = new Stopwatch();
 
-        private const int StageDurationMs = 900; // 0.5 seconds per PNG
-        private const int TotalDurationMs = 1800; // 1.0 second total
-        private const int FadeDurationMs = 80;    // 20ms fast fade in/out
+        private const int StageDurationMs = 750;  // 0.75 seconds per PNG
+        private const int TotalDurationMs = 1500; // 1.5 seconds total
+        private const int FadeDurationMs = 20;    // 20ms fast fade in/out
 
         public SplashForm()
         {
@@ -3496,7 +3867,7 @@ namespace LabTools
             float alpha1 = 0f;
             float alpha2 = 0f;
 
-            // Stage 1: 0ms to 500ms (20ms fade in, 460ms hold, 20ms fade out)
+            // Stage 1: 0ms to 750ms
             if (elapsed < StageDurationMs)
             {
                 if (elapsed < FadeDurationMs)
@@ -3506,7 +3877,7 @@ namespace LabTools
                 else
                     alpha1 = Math.Max(0f, 1f - ((float)(elapsed - (StageDurationMs - FadeDurationMs)) / FadeDurationMs));
             }
-            // Stage 2: 500ms to 1000ms (Starts only after Stage 1 is 100% gone)
+            // Stage 2: 750ms to 1500ms (Starts only after Stage 1 is 100% gone)
             else if (elapsed < TotalDurationMs)
             {
                 long t2 = elapsed - StageDurationMs;
