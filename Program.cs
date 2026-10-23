@@ -3378,5 +3378,105 @@ namespace LabTools
             borderStream?.Dispose();  
             base.OnFormClosed(e);  
         }  
-    }  
+    }  // ========================================================================  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR  
+    // ========================================================================  
+    public class SplashForm : Form
+    {
+        private Image? stage1Image;
+        private Image? stage2Image;
+        private System.Windows.Forms.Timer animTimer;
+        private int currentStage = 1;
+        private double currentOpacity = 0.0;
+        private int frameCounter = 0;
+        private bool isFadingIn = true;
+
+        public SplashForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Size = new Size(520, 330);
+            this.BackColor = Color.FromArgb(18, 19, 22);
+            this.TopMost = true;
+            this.DoubleBuffered = true;
+            this.Opacity = 0.0;
+
+            try
+            {
+                if (File.Exists("splash_stage1.jpg")) stage1Image = Image.FromFile("splash_stage1.jpg");
+                if (File.Exists("splash_stage2.jpg")) stage2Image = Image.FromFile("splash_stage2.jpg");
+            }
+            catch { }
+
+            animTimer = new System.Windows.Forms.Timer { Interval = 15 };
+            animTimer.Tick += AnimTimer_Tick;
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            animTimer.Start();
+        }
+
+        private void AnimTimer_Tick(object? sender, EventArgs e)
+        {
+            if (isFadingIn)
+            {
+                currentOpacity += 0.08;
+                if (currentOpacity >= 1.0)
+                {
+                    currentOpacity = 1.0;
+                    frameCounter++;
+                    if (frameCounter > 50)
+                    {
+                        if (currentStage == 1 && stage2Image != null)
+                        {
+                            currentStage = 2;
+                            frameCounter = 0;
+                        }
+                        else if (frameCounter > 65)
+                        {
+                            isFadingIn = false;
+                            frameCounter = 0;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                currentOpacity -= 0.1;
+                if (currentOpacity <= 0.0)
+                {
+                    currentOpacity = 0.0;
+                    animTimer.Stop();
+                    this.Close();
+                }
+            }
+
+            this.Opacity = currentOpacity;
+            this.Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Color.FromArgb(18, 19, 22));
+            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            Image? currentImg = (currentStage == 1) ? stage1Image : stage2Image;
+            if (currentImg != null)
+            {
+                e.Graphics.DrawImage(currentImg, 0, 0, this.Width, this.Height);
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            animTimer?.Dispose();
+            stage1Image?.Dispose();
+            stage2Image?.Dispose();
+            base.OnFormClosed(e);
+        }
+    }
 }
