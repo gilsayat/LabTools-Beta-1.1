@@ -2767,7 +2767,7 @@ namespace LabTools
     }  
 
     // ========================================================================  
-    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (EMBEDDED RESOURCES)  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (6-SECOND DURATION)  
     // ========================================================================  
     public class SplashForm : Form
     {
@@ -2776,15 +2776,15 @@ namespace LabTools
         private System.Windows.Forms.Timer animTimer;
         private int currentStage = 1;
         private double currentOpacity = 0.0;
-        private int frameCounter = 0;
-        private bool isFadingIn = true;
+        private int tickCounter = 0;
 
         public SplashForm()
         {
             this.FormBorderStyle = FormBorderStyle.None;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(520, 330);
-            this.BackColor = Color.FromArgb(18, 19, 22);
+            this.Size = new Size(880, 560); // Scaled up for a larger presentation
+            this.BackColor = Color.Magenta; // Transparent background key color
+            this.TransparencyKey = Color.Magenta; 
             this.TopMost = true;
             this.DoubleBuffered = true;
             this.Opacity = 0.0;
@@ -2793,13 +2793,11 @@ namespace LabTools
             {
                 var assembly = System.Reflection.Assembly.GetExecutingAssembly();
                 
-                // Read Stage 1 from embedded assembly resources
                 using (var stream1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.jpg"))
                 {
                     if (stream1 != null) stage1Image = new Bitmap(stream1);
                 }
 
-                // Read Stage 2 from embedded assembly resources
                 using (var stream2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.jpg"))
                 {
                     if (stream2 != null) stage2Image = new Bitmap(stream2);
@@ -2828,46 +2826,49 @@ namespace LabTools
 
         private void AnimTimer_Tick(object? sender, EventArgs e)
         {
-            if (isFadingIn)
+            tickCounter++;
+
+            // Total 6 seconds breakdown at 15ms interval (400 total ticks):
+            // Ticks 0 - 40   (~0.6s): Fade In (Stage 1)
+            // Ticks 41 - 200 (~2.4s): Hold Stage 1
+            // Ticks 201      : Switch to Stage 2 ("Lt")
+            // Ticks 201 - 360(~2.4s): Hold Stage 2
+            // Ticks 361 - 400(~0.6s): Fade Out
+
+            if (tickCounter <= 40)
             {
-                currentOpacity += 0.05; 
-                if (currentOpacity >= 1.0)
-                {
-                    currentOpacity = 1.0;
-                    frameCounter++;
-                    
-                    if (frameCounter > 80)
-                    {
-                        if (currentStage == 1 && stage2Image != null)
-                        {
-                            currentStage = 2;
-                            frameCounter = 0; 
-                        }
-                        else if (frameCounter > 80)
-                        {
-                            isFadingIn = false;
-                            frameCounter = 0;
-                        }
-                    }
-                }
+                currentStage = 1;
+                currentOpacity = (double)tickCounter / 40.0; // 0.0 -> 1.0
+            }
+            else if (tickCounter <= 200)
+            {
+                currentStage = 1;
+                currentOpacity = 1.0;
+            }
+            else if (tickCounter <= 360)
+            {
+                currentStage = 2;
+                currentOpacity = 1.0;
+            }
+            else if (tickCounter <= 400)
+            {
+                currentStage = 2;
+                int fadeOutTicks = tickCounter - 360;
+                currentOpacity = 1.0 - ((double)fadeOutTicks / 40.0); // 1.0 -> 0.0
             }
             else
             {
-                currentOpacity -= 0.05; 
-                if (currentOpacity <= 0.0)
-                {
-                    currentOpacity = 0.0;
-                    CloseSplash();
-                }
+                CloseSplash();
+                return;
             }
 
-            this.Opacity = currentOpacity;
+            this.Opacity = Math.Max(0.0, Math.Min(1.0, currentOpacity));
             this.Invalidate();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            e.Graphics.Clear(Color.FromArgb(18, 19, 22));
+            e.Graphics.Clear(Color.Magenta);
             e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
             e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
             e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
@@ -2879,9 +2880,9 @@ namespace LabTools
             }
             else
             {
-                using (Font f = new Font("Segoe UI", 12, FontStyle.Bold))
+                using (Font f = new Font("Segoe UI", 16, FontStyle.Bold))
                 {
-                    e.Graphics.DrawString("Loading LabTools...", f, Brushes.White, new PointF(160, 140));
+                    e.Graphics.DrawString("Loading LabTools...", f, Brushes.White, new PointF(300, 250));
                 }
             }
         }
