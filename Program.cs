@@ -2870,4 +2870,166 @@ namespace LabTools
             base.OnFormClosed(e);
         }
     }
+    
+    // ========================================================================  
+    // ADOBE-INSPIRED TWO-STAGE SPLASH SCREEN ANIMATOR (BULLETPROOF FALLBACK)  
+    // ========================================================================  
+    public class SplashForm : Form
+    {
+        private Image? stage1Image;
+        private Image? stage2Image;
+        private System.Windows.Forms.Timer animTimer;
+        private int currentStage = 1;
+        private double currentOpacity = 0.0;
+        private int frameCounter = 0;
+        private bool isFadingIn = true;
+
+        private readonly Color[] logoStripeColors = new Color[]  
+        {  
+            Color.FromArgb(128, 130, 133), Color.FromArgb(0, 188, 212),  
+            Color.FromArgb(0, 114, 206), Color.FromArgb(0, 47, 108),  
+            Color.FromArgb(67, 176, 42), Color.FromArgb(243, 146, 0),  
+            Color.FromArgb(227, 27, 35)  
+        };  
+
+        public SplashForm()
+        {
+            this.FormBorderStyle = FormBorderStyle.None;
+            this.StartPosition = FormStartPosition.CenterScreen;
+            this.Size = new Size(520, 330);
+            this.BackColor = Color.FromArgb(18, 19, 22);
+            this.TopMost = true;
+            this.DoubleBuffered = true;
+            this.Opacity = 0.0;
+
+            try
+            {
+                string path1 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage1.jpg");
+                string path2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "splash_stage2.jpg");
+
+                if (File.Exists(path1)) stage1Image = Image.FromFile(path1);
+                if (File.Exists(path2)) stage2Image = Image.FromFile(path2);
+            }
+            catch { }
+
+            animTimer = new System.Windows.Forms.Timer { Interval = 15 };
+            animTimer.Tick += AnimTimer_Tick;
+
+            this.Click += (s, e) => CloseSplash();
+            this.KeyDown += (s, e) => CloseSplash();
+        }
+
+        private void CloseSplash()
+        {
+            animTimer?.Stop();
+            this.Close();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            animTimer.Start();
+        }
+
+        private void AnimTimer_Tick(object? sender, EventArgs e)
+        {
+            if (isFadingIn)
+            {
+                currentOpacity += 0.05; 
+                if (currentOpacity >= 1.0)
+                {
+                    currentOpacity = 1.0;
+                    frameCounter++;
+                    
+                    if (frameCounter > 80)
+                    {
+                        if (currentStage == 1)
+                        {
+                            currentStage = 2;
+                            frameCounter = 0; 
+                        }
+                        else if (frameCounter > 80)
+                        {
+                            isFadingIn = false;
+                            frameCounter = 0;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                currentOpacity -= 0.05; 
+                if (currentOpacity <= 0.0)
+                {
+                    currentOpacity = 0.0;
+                    CloseSplash();
+                }
+            }
+
+            this.Opacity = currentOpacity;
+            this.Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Color.FromArgb(18, 19, 22));
+            e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            e.Graphics.SmoothingMode = SmoothingMode.HighQuality;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            Image? currentImg = (currentStage == 1) ? stage1Image : stage2Image;
+            if (currentImg != null)
+            {
+                e.Graphics.DrawImage(currentImg, 0, 0, this.Width, this.Height);
+            }
+            else
+            {
+                // -- FALLBACK GDI+ RENDERING IF JPG FILES ARE NOT FOUND --
+                if (currentStage == 1)
+                {
+                    using (Font fTitle = new Font("Segoe UI", 24, FontStyle.Bold))
+                    using (Font fSub = new Font("Segoe UI", 10, FontStyle.Bold))
+                    using (Font fCredit = new Font("Segoe UI", 9))
+                    using (Font fCreditSub = new Font("Segoe UI", 8))
+                    {
+                        e.Graphics.DrawString("pixels", fTitle, Brushes.White, new PointF(190, 70));
+                        int barX = 170, barY = 115, segWidth = 26, segHeight = 8;
+                        for (int i = 0; i < logoStripeColors.Length; i++)
+                        {
+                            using (Brush b = new SolidBrush(logoStripeColors[i]))
+                                e.Graphics.FillRectangle(b, barX + (i * segWidth), barY, segWidth, segHeight);
+                        }
+                        e.Graphics.DrawString("LAB TECHNICIAN", fSub, Brushes.White, new PointF(185, 130));
+                        e.Graphics.DrawString("Created by Gil", fCredit, Brushes.LightGray, new PointF(210, 185));
+                        e.Graphics.DrawString("Inspired by Hassan / MTP", fCreditSub, Brushes.Gray, new PointF(180, 205));
+                        e.Graphics.DrawString("LOADING WORKFLOW MODULES...", fCreditSub, Brushes.Gray, new PointF(30, 290));
+                    }
+                }
+                else
+                {
+                    using (Font fTitle = new Font("Segoe UI", 28, FontStyle.Bold))
+                    using (Font fSub = new Font("Segoe UI", 11, FontStyle.Bold))
+                    using (Font fCredit = new Font("Segoe UI", 9))
+                    using (Font fCreditSub = new Font("Segoe UI", 8))
+                    {
+                        e.Graphics.DrawString("Lt", fTitle, Brushes.White, new PointF(230, 75));
+                        e.Graphics.DrawString("Lab Tools", fSub, Brushes.White, new PointF(215, 125));
+                        e.Graphics.DrawString("LABTECH PRINTING SYSTEM", new Font("Segoe UI", 7.5f), Brushes.Gray, new PointF(180, 145));
+                        e.Graphics.DrawString("Created by Gil", fCredit, Brushes.LightGray, new PointF(210, 185));
+                        e.Graphics.DrawString("Inspired by Hassan / MTP", fCreditSub, Brushes.Gray, new PointF(180, 205));
+                        e.Graphics.DrawString("INITIALIZING INTERFACE...", fCreditSub, Brushes.Gray, new PointF(30, 290));
+                    }
+                }
+            }
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            animTimer?.Dispose();
+            stage1Image?.Dispose();
+            stage2Image?.Dispose();
+            base.OnFormClosed(e);
+        }
+    }
 }
