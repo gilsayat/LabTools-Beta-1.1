@@ -10,12 +10,6 @@
 
     <!-- EMBEDS THE LOGO INTO THE .EXE FILE -->
     <ApplicationIcon>labtools_icon.ico</ApplicationIcon>
-</PropertyGroup>
-<ItemGroup>
-  <Content Include="labtools_icon.ico">
-    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-  </Content>
-</ItemGroup>
 
     <!-- ========================================== -->
     <!-- APP METADATA & PUBLISHER INFO              -->
@@ -61,5 +55,20 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
+
+  <!-- ========================================== -->
+  <!-- EMBEDDED ASSETS & DEPLOYMENT FILES         -->
+  <!-- ========================================== -->
+  <ItemGroup>
+    <Content Include="labtools_icon.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="splash_stage1.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="splash_stage2.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
 </Project>
