@@ -16,9 +16,10 @@ using System.Collections.Generic;
 using System.Security.Cryptography;  
 using System.Runtime.InteropServices;  
 using System.Diagnostics;
+using System.Globalization;
   
 // ========================================================================  
-// LabTools-Beta - Laboratory Workflow Automation System  
+// LabTools v3.1 - Laboratory Workflow Automation System  
 // Publisher: Gil Sayat (Stored in Application Metadata)  
 // ========================================================================  
   
@@ -124,7 +125,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools-Beta";  
+        public const string AppTitle = "LabTools v3.1";  
   
         // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
@@ -161,6 +162,7 @@ namespace LabTools
         };
   
         private AppConfig config = null!;  
+        private Label lblTitleBarCruise = null!;
         private TextBox txtSearch = null!;  
         private Button btnFind = null!;  
         private Button btnCancelSearch = null!;  
@@ -210,16 +212,35 @@ namespace LabTools
         [DllImport("user32.dll", CharSet = CharSet.Auto)]  
         extern static bool DestroyIcon(IntPtr handle);  
         private static Icon? appIcon = null;  
+        private static Bitmap? smallTitleIconBmp = null;
   
         [DllImport("user32.dll", CharSet = CharSet.Auto)]  
         private static extern int SendMessage(IntPtr hWnd, int msg, int wParam, [MarshalAs(UnmanagedType.LPWStr)] string lParam);  
         private const int EM_SETCUEBANNER = 0x1501;  
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
+
+        private const int WM_NCLBUTTONDOWN = 0xA1;
+        private const int HTCAPTION = 0x2;
   
         private void SetPlaceholder(TextBox textBox, string placeholder)  
         {  
             if (textBox.IsHandleCreated) SendMessage(textBox.Handle, EM_SETCUEBANNER, 1, placeholder);  
             else textBox.HandleCreated += (s, e) => SendMessage(textBox.Handle, EM_SETCUEBANNER, 1, placeholder);  
         }  
+
+        private void DragForm_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ReleaseCapture();
+                SendMessage(this.Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            }
+        }
   
         // ========================================================================  
         // ROBUST CSV PARSER & SANITIZERS  
@@ -263,7 +284,7 @@ namespace LabTools
         }  
   
         // ========================================================================  
-        // NETWORK VOYAGE SYNC ENGINE  
+        // NETWORK VOYAGE SYNC ENGINE & CRUISE DATE CUTOFF PARSER (12:00 PM NOON)
         // ========================================================================  
         private string GetNetworkVoyage()  
         {  
@@ -282,6 +303,7 @@ namespace LabTools
   
         private void SetNetworkVoyage(string voyage)  
         {  
+            string cleanVoyage = voyage.Trim().ToUpperInvariant();
             string networkFile = @"Z:\PhotoLab\EHM\GIL\ActiveVoyage.txt";  
             try  
             {  
@@ -289,13 +311,55 @@ namespace LabTools
                 if (File.Exists(networkFile)) {  
                     File.SetAttributes(networkFile, File.GetAttributes(networkFile) & ~FileAttributes.Hidden);  
                 }  
-                Program.SafeWriteAllText(networkFile, voyage);  
+                Program.SafeWriteAllText(networkFile, cleanVoyage);  
                 File.SetAttributes(networkFile, File.GetAttributes(networkFile) | FileAttributes.Hidden);  
             }  
             catch { }  
-            config.CurrentVoyage = voyage;  
+            config.CurrentVoyage = cleanVoyage;  
             config.Save();  
+            UpdateTitleBarCruiseDisplay();
         }  
+
+        private void UpdateTitleBarCruiseDisplay()
+        {
+            string currentCruise = GetNetworkVoyage().Trim().ToUpperInvariant();
+            if (lblTitleBarCruise != null && !lblTitleBarCruise.IsDisposed)
+            {
+                lblTitleBarCruise.Text = currentCruise;
+            }
+            this.Text = $"{AppTitle} - {currentCruise}";
+        }
+
+        private DateTime? GetCurrentCruiseCutoffDateTime()
+        {
+            string voyage = GetNetworkVoyage().Trim();
+            if (string.IsNullOrEmpty(voyage) || voyage.Length < 6) return null;
+
+            // Ignore first 2 ship-code letters and parse the last 6 digits as MMddyy
+            string datePart = voyage.Substring(voyage.Length - 6);
+            if (DateTime.TryParseExact(datePart, "MMddyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate))
+            {
+                // Start of the cruise at 12:00 PM (Noon)
+                return parsedDate.Date.AddHours(12);
+            }
+            return null;
+        }
+
+        private static bool IsOrderFileWithinCruiseWindow(string filePath, DateTime? cutoffDateTime)
+        {
+            if (!cutoffDateTime.HasValue) return true;
+            try
+            {
+                FileInfo fi = new FileInfo(filePath);
+                if (!fi.Exists) return false;
+                DateTime fileTime = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
+                return fileTime >= cutoffDateTime.Value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
   
         public MainForm()  
         {  
@@ -303,6 +367,7 @@ namespace LabTools
               
             config = AppConfig.Load();  
             InitializeCustomComponent();  
+            UpdateTitleBarCruiseDisplay();
             LoadMediaSizes();
             LoadCustomTemplates();  
             SetupFolderWatcher();  
@@ -424,6 +489,7 @@ namespace LabTools
                             }  
                         }  
                     }  
+                    smallTitleIconBmp = new Bitmap(bmp, new Size(20, 20));
                     IntPtr hIcon = bmp.GetHicon();  
                     appIcon = (Icon)Icon.FromHandle(hIcon).Clone();  
                     DestroyIcon(hIcon);  
@@ -443,10 +509,11 @@ namespace LabTools
         {  
             this.Text = AppTitle;  
               
-            this.Size = new Size(930, 850);  
-            this.MinimumSize = new Size(930, 850);  
-            this.MaximumSize = new Size(930, 850);  
-            this.FormBorderStyle = FormBorderStyle.FixedSingle;  
+            int titleBarOffset = 34; // Custom Windows 11 Dark Title Bar height
+            this.Size = new Size(930, 820 + titleBarOffset);  
+            this.MinimumSize = new Size(930, 820 + titleBarOffset);  
+            this.MaximumSize = new Size(930, 820 + titleBarOffset);  
+            this.FormBorderStyle = FormBorderStyle.None;  
             this.MaximizeBox = false;  
             this.StartPosition = FormStartPosition.CenterScreen;  
             this.BackColor = darkBackground;  
@@ -456,9 +523,60 @@ namespace LabTools
             this.AllowDrop = true;
             this.DragEnter += HandleFileDragEnter;
             this.DragDrop += HandleFileDragDrop;
+
+            // ========================================================================
+            // CUSTOM OUTER WINDOWS TITLE BAR (WITH BOLD CENTERED CURRENT CRUISE)
+            // ========================================================================
+            Panel customWindowBar = new Panel() { Location = new Point(0, 0), Width = 930, Height = titleBarOffset, BackColor = Color.FromArgb(60, 60, 60) };
+            customWindowBar.MouseDown += DragForm_MouseDown;
+
+            PictureBox picWindowIcon = new PictureBox() { Location = new Point(10, 7), Size = new Size(20, 20), Image = smallTitleIconBmp, SizeMode = PictureBoxSizeMode.Zoom };
+            picWindowIcon.MouseDown += DragForm_MouseDown;
+
+            Label lblWindowTitleLeft = new Label() { Text = AppTitle, Location = new Point(36, 7), AutoSize = true, ForeColor = Color.FromArgb(240, 240, 240), Font = new Font("Segoe UI", 9.5f, FontStyle.Regular) };
+            lblWindowTitleLeft.MouseDown += DragForm_MouseDown;
+
+            // Prominent Centered Current Cruise Display (ALL CAPS, BOLD, HIGH VISIBILITY)
+            lblTitleBarCruise = new Label()
+            {
+                Text = GetNetworkVoyage().ToUpperInvariant(),
+                Location = new Point(265, 2),
+                Width = 400,
+                Height = 30,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            lblTitleBarCruise.MouseDown += DragForm_MouseDown;
+
+            Button btnMinWin = new Button() { Text = "—", Location = new Point(792, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.White, Font = new Font("Segoe UI", 9f), TabStop = false };
+            btnMinWin.FlatAppearance.BorderSize = 0;
+            btnMinWin.FlatAppearance.MouseOverBackColor = Color.FromArgb(85, 85, 85);
+            btnMinWin.Click += (s, e) => { this.WindowState = FormWindowState.Minimized; };
+
+            Button btnMaxWin = new Button() { Text = "☐", Location = new Point(838, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.FromArgb(120, 120, 120), Font = new Font("Segoe UI", 9f), Enabled = false, TabStop = false };
+            btnMaxWin.FlatAppearance.BorderSize = 0;
+
+            Button btnCloseWin = new Button() { Text = "✕", Location = new Point(884, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f), TabStop = false };
+            btnCloseWin.FlatAppearance.BorderSize = 0;
+            btnCloseWin.FlatAppearance.MouseOverBackColor = Color.FromArgb(232, 17, 35);
+            btnCloseWin.Click += (s, e) => { this.Close(); };
+
+            customWindowBar.Controls.Add(picWindowIcon);
+            customWindowBar.Controls.Add(lblWindowTitleLeft);
+            customWindowBar.Controls.Add(lblTitleBarCruise);
+            customWindowBar.Controls.Add(btnMinWin);
+            customWindowBar.Controls.Add(btnMaxWin);
+            customWindowBar.Controls.Add(btnCloseWin);
+            this.Controls.Add(customWindowBar);
   
-            Panel topBar = new Panel() { Location = new Point(0, 0), Width = 930, Height = 46, BackColor = Color.FromArgb(22, 23, 27) };  
+            // ========================================================================
+            // APP NAVIGATION TOP BAR
+            // ========================================================================
+            Panel topBar = new Panel() { Location = new Point(0, titleBarOffset), Width = 930, Height = 46, BackColor = Color.FromArgb(22, 23, 27) };  
+            topBar.MouseDown += DragForm_MouseDown;
             Label lblTitle = new Label() { Text = AppTitle, Location = new Point(15, 12), ForeColor = textWhite, Font = new Font("Segoe UI", 11f, FontStyle.Bold), AutoSize = true };  
+            lblTitle.MouseDown += DragForm_MouseDown;
             Button btnHistory = new Button() { Text = "Voyage Order History", Location = new Point(590, 8), Width = 170, Height = 30, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
             btnHistory.Click += (s, e) => { OpenOrderHistoryDialog(); };  
             Button btnSettings = new Button() { Text = "Settings / Folders", Location = new Point(770, 8), Width = 140, Height = 30, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
@@ -469,16 +587,16 @@ namespace LabTools
             topBar.Controls.Add(btnSettings);  
             this.Controls.Add(topBar);  
   
-            txtSearch = new TextBox() { Text = "", Location = new Point(20, 58), Width = 290, Height = 30, Font = new Font("Segoe UI", 10) };  
+            txtSearch = new TextBox() { Text = "", Location = new Point(20, 58 + titleBarOffset), Width = 290, Height = 30, Font = new Font("Segoe UI", 10) };  
             txtSearch.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { SearchFilesAsync(txtSearch.Text); e.Handled = true; e.SuppressKeyPress = true; } };  
               
-            btnFind = new Button() { Text = "Find", Location = new Point(320, 56), Width = 85, Height = 32, BackColor = accentBlue, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            btnFind = new Button() { Text = "Find", Location = new Point(320, 56 + titleBarOffset), Width = 85, Height = 32, BackColor = accentBlue, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
             btnFind.Click += (s, e) => { SearchFilesAsync(txtSearch.Text); };  
   
-            btnCancelSearch = new Button() { Text = "Cancel", Location = new Point(410, 56), Width = 75, Height = 32, BackColor = Color.FromArgb(180, 50, 50), ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Enabled = false, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
+            btnCancelSearch = new Button() { Text = "Cancel", Location = new Point(410, 56 + titleBarOffset), Width = 75, Height = 32, BackColor = Color.FromArgb(180, 50, 50), ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Enabled = false, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
             btnCancelSearch.Click += (s, e) => { searchCts?.Cancel(); btnCancelSearch.Enabled = false; SetStatus("Search cancelled by operator."); };  
   
-            Button btnClearAll = new Button() { Text = "Clear All", Location = new Point(490, 56), Width = 90, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f) };  
+            Button btnClearAll = new Button() { Text = "Clear All", Location = new Point(490, 56 + titleBarOffset), Width = 90, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f) };  
             btnClearAll.Click += (s, e) => {   
                 txtSearch.Clear(); lstFiles.Items.Clear(); ResetLogoPreview();   
                 txtCabin.Clear(); txtCanvasCabin.Clear(); txtPrintCabinNum.Clear(); txtSeller.Clear();  
@@ -488,93 +606,93 @@ namespace LabTools
             };  
   
             // 3 BALANCED ACTION BUTTONS (Width = 175 each)
-            Button btnOtherSource = new Button() { Text = "Select Other Source", Location = new Point(20, 98), Width = 175, Height = 35, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
+            Button btnOtherSource = new Button() { Text = "Select Other Source", Location = new Point(20, 98 + titleBarOffset), Width = 175, Height = 35, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
             btnOtherSource.Click += (s, e) => { SelectFilesFromOtherSource(); };  
   
-            Button btnExcelList = new Button() { Text = "Import CSV / Clipboard", Location = new Point(205, 98), Width = 175, Height = 35, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
+            Button btnExcelList = new Button() { Text = "Import CSV / Clipboard", Location = new Point(205, 98 + titleBarOffset), Width = 175, Height = 35, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };  
             btnExcelList.Click += (s, e) => { ImportExcelOrClipboardList(); };  
 
-            btnCheckOrderIds = new Button() { Text = "Check Order IDs", Location = new Point(390, 98), Width = 175, Height = 35, BackColor = accentBlue, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };
+            btnCheckOrderIds = new Button() { Text = "Check Order IDs", Location = new Point(390, 98 + titleBarOffset), Width = 175, Height = 35, BackColor = accentBlue, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.25f, FontStyle.Bold) };
             btnCheckOrderIds.Click += (s, e) => { CheckOrderIdsForCabin(); };
   
-            lstFiles = new CheckedListBox() { Location = new Point(20, 142), Width = 340, Height = 145, BackColor = Color.FromArgb(70, 70, 70), ForeColor = textWhite, AllowDrop = true };  
+            lstFiles = new CheckedListBox() { Location = new Point(20, 142 + titleBarOffset), Width = 340, Height = 145, BackColor = Color.FromArgb(70, 70, 70), ForeColor = textWhite, AllowDrop = true };  
             lstFiles.SelectedIndexChanged += (s, e) => { PreviewSelectedImageSafe(); };  
             lstFiles.DragEnter += HandleFileDragEnter;
             lstFiles.DragDrop += HandleFileDragDrop;
               
-            Button btnSelectAll = new Button() { Text = "Select All", Location = new Point(370, 142), Width = 210, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat };  
+            Button btnSelectAll = new Button() { Text = "Select All", Location = new Point(370, 142 + titleBarOffset), Width = 210, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat };  
             btnSelectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, true); lstFiles.EndUpdate(); };  
   
-            Button btnUnselectAll = new Button() { Text = "Unselect All", Location = new Point(370, 180), Width = 210, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat };  
+            Button btnUnselectAll = new Button() { Text = "Unselect All", Location = new Point(370, 180 + titleBarOffset), Width = 210, Height = 32, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat };  
             btnUnselectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, false); lstFiles.EndUpdate(); };  
   
-            lblFilesFound = new Label() { Text = "0 Files Found", Location = new Point(370, 222), Width = 210, Height = 25, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
+            lblFilesFound = new Label() { Text = "0 Files Found", Location = new Point(370, 222 + titleBarOffset), Width = 210, Height = 25, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
   
-            progressBar = new ProgressBar() { Location = new Point(20, 292), Width = 560, Height = 8, Style = ProgressBarStyle.Continuous, Visible = false };  
+            progressBar = new ProgressBar() { Location = new Point(20, 292 + titleBarOffset), Width = 560, Height = 8, Style = ProgressBarStyle.Continuous, Visible = false };  
   
-            Label lblMachine = new Label() { Text = "Select Machine:", Location = new Point(20, 312), ForeColor = textWhite, AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
-            cmbMachine = new ComboBox() { Location = new Point(130, 310), Width = 160, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList };  
+            Label lblMachine = new Label() { Text = "Select Machine:", Location = new Point(20, 312 + titleBarOffset), ForeColor = textWhite, AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            cmbMachine = new ComboBox() { Location = new Point(130, 310 + titleBarOffset), Width = 160, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList };  
             cmbMachine.Items.AddRange(new string[] { "Machine A", "Machine B", "Machine C", "Machine D" });  
             cmbMachine.SelectedIndex = 2;  
             cmbMachine.SelectedIndexChanged += (s, e) => { CheckMachineHealthAsync(); };  
   
-            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(300, 313), AutoSize = true, ForeColor = Color.LightGray, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
+            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(300, 313 + titleBarOffset), AutoSize = true, ForeColor = Color.LightGray, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
   
-            Label lblUsb = new Label() { Text = "USB Drive", Location = new Point(20, 347), ForeColor = textWhite, AutoSize = true };  
-            Label lblUsbCabin = new Label() { Text = "Cabin", Location = new Point(160, 347), ForeColor = textWhite, AutoSize = true };  
+            Label lblUsb = new Label() { Text = "USB Drive", Location = new Point(20, 347 + titleBarOffset), ForeColor = textWhite, AutoSize = true };  
+            Label lblUsbCabin = new Label() { Text = "Cabin", Location = new Point(160, 347 + titleBarOffset), ForeColor = textWhite, AutoSize = true };  
               
-            txtUsbDrive = new TextBox() { Text = "D", Location = new Point(20, 372), Width = 120, Height = 25, TextAlign = HorizontalAlignment.Center };  
-            txtCabin = new TextBox() { Text = "", Location = new Point(155, 372), Width = 120, Height = 25 };   
+            txtUsbDrive = new TextBox() { Text = "D", Location = new Point(20, 372 + titleBarOffset), Width = 120, Height = 25, TextAlign = HorizontalAlignment.Center };  
+            txtCabin = new TextBox() { Text = "", Location = new Point(155, 372 + titleBarOffset), Width = 120, Height = 25 };   
             SetPlaceholder(txtCabin, "cabin");  
   
-            Button btnCopyUsb = new Button() { Text = "Copy To USB", Location = new Point(290, 345), Width = 135, Height = 52, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            Button btnCopyUsb = new Button() { Text = "Copy To USB", Location = new Point(290, 345 + titleBarOffset), Width = 135, Height = 52, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
             btnCopyUsb.Click += (s, e) => { CopyCheckedFilesToUsb(); };  
   
-            Button btnCopyDownloads = new Button() { Text = "Copy To Downloads", Location = new Point(435, 345), Width = 135, Height = 52, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            Button btnCopyDownloads = new Button() { Text = "Copy To Downloads", Location = new Point(435, 345 + titleBarOffset), Width = 135, Height = 52, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
             btnCopyDownloads.Click += (s, e) => { CopyToDownloadsFolder(); };  
   
-            lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(20, 417), ForeColor = Color.FromArgb(130, 220, 210), AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
-            txtCanvasCabin = new TextBox() { Text = "", Location = new Point(245, 414), Width = 115, Height = 25 };   
+            lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(20, 417 + titleBarOffset), ForeColor = Color.FromArgb(130, 220, 210), AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
+            txtCanvasCabin = new TextBox() { Text = "", Location = new Point(245, 414 + titleBarOffset), Width = 115, Height = 25 };   
             SetPlaceholder(txtCanvasCabin, "cabin");  
   
-            txtSeller = new TextBox() { Text = "", Location = new Point(245, 444), Width = 115, Height = 25 };  
+            txtSeller = new TextBox() { Text = "", Location = new Point(245, 444 + titleBarOffset), Width = 115, Height = 25 };  
             SetPlaceholder(txtSeller, "seller");  
   
-            cmbCanvasSize = new ComboBox() { Location = new Point(20, 444), Width = 215, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList };  
+            cmbCanvasSize = new ComboBox() { Location = new Point(20, 444 + titleBarOffset), Width = 215, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList };  
             cmbCanvasSize.Items.AddRange(new string[] { "16x20", "20x30", "11x14", "8x10" });  
             cmbCanvasSize.SelectedIndex = 0;  
   
-            Button btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(370, 414), Width = 200, Height = 55, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
+            Button btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(370, 414 + titleBarOffset), Width = 200, Height = 55, BackColor = accentTeal, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
             btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
   
-            Label lblPrintCabinLabel = new Label() { Text = "Cabin", Location = new Point(20, 490), ForeColor = textWhite, AutoSize = true };  
-            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(65, 487), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center };  
+            Label lblPrintCabinLabel = new Label() { Text = "Cabin", Location = new Point(20, 490 + titleBarOffset), ForeColor = textWhite, AutoSize = true };  
+            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(65, 487 + titleBarOffset), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center };  
             SetPlaceholder(txtPrintCabinNum, "cabin");  
   
-            lblPrintQty = new Label() { Text = "Qty", Location = new Point(155, 490), ForeColor = textWhite, AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
-            numPrintQty = new NumericUpDown() { Location = new Point(185, 487), Width = 50, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            lblPrintQty = new Label() { Text = "Qty", Location = new Point(155, 490 + titleBarOffset), ForeColor = textWhite, AutoSize = true, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            numPrintQty = new NumericUpDown() { Location = new Point(185, 487 + titleBarOffset), Width = 50, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
   
-            cmbPrintSizeInput = new ComboBox() { Location = new Point(245, 487), Width = 325, Height = 25, DropDownStyle = ComboBoxStyle.DropDown };  
+            cmbPrintSizeInput = new ComboBox() { Location = new Point(245, 487 + titleBarOffset), Width = 325, Height = 25, DropDownStyle = ComboBoxStyle.DropDown };  
   
             txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
             txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
             txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
   
-            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(30, 527), Width = 120, Height = 25, ForeColor = textWhite };  
+            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(30, 527 + titleBarOffset), Width = 120, Height = 25, ForeColor = textWhite };  
               
-            cmbOrderType = new ComboBox() { Location = new Point(20, 557), Width = 270, Height = 25, DropDownStyle = ComboBoxStyle.DropDown };  
+            cmbOrderType = new ComboBox() { Location = new Point(20, 557 + titleBarOffset), Width = 270, Height = 25, DropDownStyle = ComboBoxStyle.DropDown };  
             cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
             cmbOrderType.Text = "Package";  
   
-            Button btnPrint = new Button() { Text = "Print", Location = new Point(300, 527), Width = 270, Height = 55, BackColor = accentTeal, ForeColor = textWhite, Font = new Font("Segoe UI", 12, FontStyle.Bold), FlatStyle = FlatStyle.Flat };  
+            Button btnPrint = new Button() { Text = "Print", Location = new Point(300, 527 + titleBarOffset), Width = 270, Height = 55, BackColor = accentTeal, ForeColor = textWhite, Font = new Font("Segoe UI", 12, FontStyle.Bold), FlatStyle = FlatStyle.Flat };  
             btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
   
-            lblStatusLeft = new Label() { Text = "Ready", Location = new Point(20, 765), Width = 560, Height = 30, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11, FontStyle.Bold) };  
+            lblStatusLeft = new Label() { Text = "Ready", Location = new Point(20, 765 + titleBarOffset), Width = 560, Height = 30, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 11, FontStyle.Bold) };  
   
             // ========================================================================
             // RIGHT PANEL (PREVIEW -> DIGITAL ORDER MONITOR -> HUBAPP CANVAS -> CABIN ORDERS)
             // ========================================================================
-            Panel rightPanel = new Panel() { Location = new Point(600, 55), Width = 310, Height = 745, BackColor = panelBackground };  
+            Panel rightPanel = new Panel() { Location = new Point(600, 55 + titleBarOffset), Width = 310, Height = 745, BackColor = panelBackground };  
   
             picLogo = new PictureBox() { Location = new Point(15, 15), Width = 280, Height = 210, BackColor = Color.FromArgb(18, 19, 22), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
@@ -686,6 +804,15 @@ namespace LabTools
             this.Controls.Add(lblStatusLeft);  
             this.Controls.Add(rightPanel);  
         }  
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            using (Pen borderPen = new Pen(Color.FromArgb(75, 75, 75), 1))
+            {
+                e.Graphics.DrawRectangle(borderPen, 0, 0, this.Width - 1, this.Height - 1);
+            }
+        }
 
         // ========================================================================
         // HUBAPP CANVAS ORDER MONITOR, THUMBNAIL RENDERER & AUTO-POSTER
@@ -991,6 +1118,7 @@ namespace LabTools
                         File.Move(tempFilePath, finalFilePath);
                     });
 
+                    AutoCopyPrintedPhotosForHybridShip(cabin, new List<string> { doneFilePath });
                     LogOrderToAuditHistory(orderId, cabin, selectedMachine, "8x10", 1, seller, new List<string> { item.FileName });
                     SetStatus($"Dispatched 8x10 canvas copy (Order {orderId}) to {selectedMachine}.");
                 }
@@ -1002,7 +1130,7 @@ namespace LabTools
         }
 
         // ========================================================================
-        // CHECK ORDER IDS (RECURSIVE SCAN ACROSS ORDERS FOLDER & SUBFOLDERS)
+        // CHECK ORDER IDS (RECURSIVE SCAN + CRUISE 12:00 PM FILE TIMESTAMP FILTER)
         // ========================================================================
         private async void CheckOrderIdsForCabin()
         {
@@ -1027,6 +1155,9 @@ namespace LabTools
                 MessageBox.Show("The Orders folder cannot be found at:\n" + ordersDir + "\n\nPlease check your Settings.", "Orders Folder Missing", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
+
+            DateTime? cruiseCutoff = GetCurrentCruiseCutoffDateTime();
+            string currentVoyageName = GetNetworkVoyage();
 
             btnFind.Enabled = false;
             progressBar.Visible = true;
@@ -1058,6 +1189,10 @@ namespace LabTools
                             {
                                 try
                                 {
+                                    // Condition: Check individual order text file date/time (>= Cruise Start Date 12:00 PM)
+                                    if (!IsOrderFileWithinCruiseWindow(txtFile, cruiseCutoff))
+                                        continue;
+
                                     bool matchCabin = false;
                                     using (var fs = new FileStream(txtFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                                     using (var reader = new StreamReader(fs, Encoding.UTF8))
@@ -1104,14 +1239,20 @@ namespace LabTools
 
                     try
                     {
-                        foreach (string csvFile in Directory.GetFiles(ordersDir, "*Print History.csv", SearchOption.TopDirectoryOnly))
+                        string currentVoyageCsv = Path.Combine(ordersDir, currentVoyageName + " Print History.csv");
+                        if (File.Exists(currentVoyageCsv))
                         {
-                            var lines = Program.SafeReadAllLines(csvFile).Skip(1);
+                            var lines = Program.SafeReadAllLines(currentVoyageCsv).Skip(1);
                             foreach (var line in lines)
                             {
                                 var parts = ParseCsvLine(line);
                                 if (parts.Length >= 6)
                                 {
+                                    if (cruiseCutoff.HasValue && DateTime.TryParse(parts[0].Trim('"'), out DateTime rowDate))
+                                    {
+                                        if (rowDate < cruiseCutoff.Value) continue;
+                                    }
+
                                     string oId = parts[1].Trim('"');
                                     string cab = parts[2].Trim('"');
                                     if (cab.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) && !seenOrderIds.Contains(oId))
@@ -1122,7 +1263,7 @@ namespace LabTools
                                             OrderId = oId,
                                             Cabin = cab,
                                             PrintSize = parts.Length > 4 ? parts[4].Trim('"') : "",
-                                            SourcePath = csvFile
+                                            SourcePath = currentVoyageCsv
                                         };
                                         if (parts.Length >= 8)
                                         {
@@ -1161,8 +1302,8 @@ namespace LabTools
                 }
                 else
                 {
-                    SetStatus($"No order tickets found for Cabin {targetCabin} in Processed or its subfolders.");
-                    MessageBox.Show($"No orders matching Cabin '{targetCabin}' were found in:\n{ordersDir}\n(including all subfolders).", "No Orders Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    SetStatus($"No order tickets found for Cabin {targetCabin} in current cruise ({currentVoyageName}).");
+                    MessageBox.Show($"No orders matching Cabin '{targetCabin}' (since {currentVoyageName} 12:00 PM start) were found in:\n{ordersDir}", "No Orders Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
             catch (Exception ex)
@@ -1448,6 +1589,8 @@ namespace LabTools
             progressBar.Visible = true;  
             progressBar.Style = ProgressBarStyle.Marquee;  
             SetStatus("Searching for '" + query + "'...");  
+
+            DateTime? cruiseCutoff = GetCurrentCruiseCutoffDateTime();
   
             try  
             {  
@@ -1517,8 +1660,8 @@ namespace LabTools
                         {  
                             string direct1 = Path.Combine(ordersDir, queryWithoutExt + ".txt");  
                             string direct2 = Path.Combine(ordersDir, cleanQuery);  
-                            if (File.Exists(direct1)) orderFilePath = direct1;  
-                            else if (File.Exists(direct2)) orderFilePath = direct2;  
+                            if (File.Exists(direct1) && IsOrderFileWithinCruiseWindow(direct1, cruiseCutoff)) orderFilePath = direct1;  
+                            else if (File.Exists(direct2) && IsOrderFileWithinCruiseWindow(direct2, cruiseCutoff)) orderFilePath = direct2;  
                             else  
                             {  
                                 var pendingDirs = new Stack<string>();  
@@ -1530,7 +1673,8 @@ namespace LabTools
                                     string currDir = pendingDirs.Pop();  
                                     try  
                                     {  
-                                        var match = Directory.EnumerateFiles(currDir, "*" + queryWithoutExt + "*.txt").FirstOrDefault();  
+                                        var match = Directory.EnumerateFiles(currDir, "*" + queryWithoutExt + "*.txt")
+                                                             .FirstOrDefault(f => IsOrderFileWithinCruiseWindow(f, cruiseCutoff));  
                                         if (match != null) { orderFilePath = match; break; }  
                                     }  
                                     catch { }  
@@ -1727,7 +1871,10 @@ namespace LabTools
                 if (searchResult.IsOrder)  
                 {  
                     numPrintQty.Value = 1;
-                    SetStatus("Found Order " + searchResult.OrderId + " with " + count + " photo(s) (ready to print).");  
+                    if (count > 0)
+                        SetStatus("Found Order " + searchResult.OrderId + " with " + count + " photo(s) (ready to print).");  
+                    else
+                        SetStatus($"Order {searchResult.OrderId} not found in current cruise ({GetNetworkVoyage()}) or photos not in Z:\\Printed.");
                 }  
                 else  
                 {  
@@ -1738,10 +1885,6 @@ namespace LabTools
                 {  
                     lstFiles.SelectedIndex = 0;  
                     PreviewSelectedImageSafe();  
-                }  
-                else  
-                {  
-                    if (searchResult.IsOrder) SetStatus("Order " + searchResult.OrderId + " found, but photos are not yet in Z:\\Printed.");  
                 }  
             }  
             catch (OperationCanceledException)
@@ -2042,6 +2185,37 @@ namespace LabTools
                 sb.AppendLine();
             }
         }
+
+        // ========================================================================  
+        // HYBRIDSHIP AUTO-COPY TO "TO PRINT FOLDER" BY CABIN (NO DUPLICATES PER CABIN)
+        // ========================================================================  
+        private void AutoCopyPrintedPhotosForHybridShip(string cabinNum, IEnumerable<string> filePaths)
+        {
+            if (!config.HybridShip) return;
+            if (string.IsNullOrWhiteSpace(config.ToPrintFolder) || string.IsNullOrWhiteSpace(cabinNum)) return;
+
+            try
+            {
+                string cabinDestDir = Path.Combine(config.ToPrintFolder, cabinNum.Trim());
+                Directory.CreateDirectory(cabinDestDir);
+
+                foreach (string srcPath in filePaths)
+                {
+                    if (string.IsNullOrWhiteSpace(srcPath) || !File.Exists(srcPath)) continue;
+
+                    string fileName = Path.GetFileName(srcPath);
+                    if (fileName.IndexOf("Copyright Release", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+
+                    string destFile = Path.Combine(cabinDestDir, fileName);
+                    // Only copy if this exact filename does not already exist in this cabin's folder
+                    if (!File.Exists(destFile))
+                    {
+                        File.Copy(srcPath, destFile, false);
+                    }
+                }
+            }
+            catch { }
+        }
   
         // ========================================================================  
         // PRINT DISPATCH  
@@ -2088,6 +2262,9 @@ namespace LabTools
   
                 string cabinNum = txtPrintCabinNum.Text.Trim();  
                 if (string.IsNullOrWhiteSpace(cabinNum)) { MessageBox.Show("Enter a cabin number before printing.", "Missing Cabin Number", MessageBoxButtons.OK, MessageBoxIcon.Warning); txtPrintCabinNum.Focus(); return; }  
+
+                // Keep original photo paths for HybridShip auto-copy
+                List<string> originalPathsToCopy = checkedItems.Select(x => x.FullPath).ToList();
                   
                 if (isPortHole || isMiniPortHole || isCustomTemplate)  
                 {  
@@ -2171,6 +2348,9 @@ namespace LabTools
   
                 Program.SafeWriteAllText(tempFilePath, sb.ToString());  
                 File.Move(tempFilePath, finalFilePath);  
+
+                // HybridShip Auto-Copy (if toggled ON)
+                AutoCopyPrintedPhotosForHybridShip(cabinNum, originalPathsToCopy);
   
                 string auditSize = isCustomTemplate ? printSize : (isFlattenedBorder ? ticketPrintSize : printSize);  
                 if (appendAuto4W) auditSize += " + Auto 4W";  
@@ -2500,6 +2680,8 @@ namespace LabTools
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());  
                         File.Move(tempFilePath, finalFilePath);  
                     });
+
+                    AutoCopyPrintedPhotosForHybridShip(cabin, checkedItems.Select(x => x.FullPath));
   
                     List<string> fileNamesToLog = checkedItems.Select(x => Path.GetFileName(x.FullPath)).ToList();  
                     LogOrderToAuditHistory(orderId, cabin, selectedMachine, "8x10", checkedItems.Count, seller, fileNamesToLog);  
@@ -2637,25 +2819,85 @@ namespace LabTools
         private void SetStatus(string message) { if (!IsDisposed && IsHandleCreated) try { Invoke(new Action(() => { lblStatusLeft.Text = message; lblStatusRight.Text = message; })); } catch { } }  
   
         // ========================================================================  
-        // SETTINGS DIALOG  
+        // SETTINGS DIALOG (WITH "HYBRIDSHIP" CAPSULE TOGGLE & "TO PRINT FOLDER")
         // ========================================================================  
         private void OpenSettingsDialog()  
         {  
             Form settingsForm = new Form()  
             {  
                 Text = AppTitle + " - Settings & HotFolder Paths",  
-                Size = new Size(690, 735),  
+                Size = new Size(690, 815),  
                 StartPosition = FormStartPosition.CenterParent,  
                 BackColor = darkBackground,  
                 FormBorderStyle = FormBorderStyle.FixedDialog,  
                 MaximizeBox = false, MinimizeBox = false,  
                 Icon = appIcon  
             };  
+
+            // Top-Right "HybridShip" Capsule Toggle Switch
+            Label lblHybridShip = new Label()
+            {
+                Text = "HybridShip",
+                Location = new Point(475, 16),
+                AutoSize = true,
+                ForeColor = textWhite,
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold)
+            };
+
+            CapsuleToggleSwitch toggleHybridShip = new CapsuleToggleSwitch()
+            {
+                Location = new Point(560, 12),
+                Size = new Size(76, 30),
+                IsOn = config.HybridShip
+            };
+
+            toggleHybridShip.Click += (s, e) =>
+            {
+                if (!toggleHybridShip.IsOn)
+                {
+                    // Turning ON -> Show required confirmation prompt
+                    string promptMsg = "Make sure to-print folder path is set in settings" +
+                                       Environment.NewLine + Environment.NewLine +
+                                       "This will turn on the auto copy of printed photos to To-Print folder, Sure ka ba?";
+
+                    DialogResult dr = MessageBox.Show(
+                        settingsForm,
+                        promptMsg,
+                        "HybridShip Confirmation",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (dr == DialogResult.Yes)
+                    {
+                        toggleHybridShip.IsOn = true;
+                        config.HybridShip = true;
+                        config.Save();
+                    }
+                    else
+                    {
+                        // Revert back to OFF if user selects No
+                        toggleHybridShip.IsOn = false;
+                        config.HybridShip = false;
+                        config.Save();
+                    }
+                }
+                else
+                {
+                    // Turning OFF
+                    toggleHybridShip.IsOn = false;
+                    config.HybridShip = false;
+                    config.Save();
+                }
+            };
+
+            settingsForm.Controls.Add(lblHybridShip);
+            settingsForm.Controls.Add(toggleHybridShip);
   
-            int y = 20;  
+            int y = 55;  
             AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);  
             AddSettingRow(settingsForm, "Orders Folder:", config.OrdersFolder, ref y, (val) => config.OrdersFolder = val);  
             AddSettingRow(settingsForm, "Downloads Folder:", config.DownloadsFolder, ref y, (val) => config.DownloadsFolder = val);  
+            AddSettingRow(settingsForm, "To Print Folder:", config.ToPrintFolder, ref y, (val) => config.ToPrintFolder = val);
             AddSettingRow(settingsForm, "Bordered Prints:", string.IsNullOrWhiteSpace(config.BorderedPrintsFolder) ? @"Z:\PixelsOrder\Prints" : config.BorderedPrintsFolder, ref y, (val) => config.BorderedPrintsFolder = val);  
             AddSettingRow(settingsForm, "Printshop Folder:", config.PrintshopFolder, ref y, (val) => config.PrintshopFolder = val);  
             AddSettingRow(settingsForm, "HubApp Canvas Order:", config.HubAppCanvasFolder, ref y, (val) => config.HubAppCanvasFolder = val);
@@ -2842,11 +3084,26 @@ namespace LabTools
             };  
   
             btnSetVoyage.Click += (s, e) => {  
-                string v = txtVoyage.Text.Trim();  
-                if(!string.IsNullOrEmpty(v)) {  
-                    SetNetworkVoyage(v);  
-                    loadHistory();  
-                    MessageBox.Show("Voyage set to " + v + ". Network synced successfully.", "Voyage Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);  
+                string v = txtVoyage.Text.Trim().ToUpperInvariant();  
+                if (!string.IsNullOrEmpty(v)) {  
+                    DialogResult confirm = MessageBox.Show(
+                        historyForm,
+                        $"Do you want to change the current cruise to {v}?",
+                        "Confirm Cruise Update",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question);
+
+                    if (confirm == DialogResult.Yes)
+                    {
+                        txtVoyage.Text = v;
+                        SetNetworkVoyage(v);  
+                        loadHistory();  
+                        MessageBox.Show("Voyage set to " + v + ". Network synced successfully.", "Voyage Updated", MessageBoxButtons.OK, MessageBoxIcon.Information);  
+                    }
+                    else
+                    {
+                        txtVoyage.Text = GetNetworkVoyage();
+                    }
                 }  
             };  
   
@@ -2979,6 +3236,8 @@ namespace LabTools
                         string finalFilePath = Path.Combine(machineTargetFolder, newOrderId + ".txt");  
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());  
                         File.Move(tempFilePath, finalFilePath);  
+
+                        AutoCopyPrintedPhotosForHybridShip(cabin, foundPaths);
                           
                         LogOrderToAuditHistory(newOrderId, cabin, machine, size, foundPaths.Count * perPhotoQty, "REPRINT", targetFiles);  
                           
@@ -3049,6 +3308,81 @@ namespace LabTools
             public override string ToString() => FileName;
         }
     }  
+
+    // ========================================================================  
+    // MODERN CAPSULE TOGGLE SWITCH CONTROL ("HybridShip" ON/OFF)
+    // ========================================================================  
+    public class CapsuleToggleSwitch : Control
+    {
+        private bool isOn = false;
+        public bool IsOn
+        {
+            get => isOn;
+            set { isOn = value; Invalidate(); }
+        }
+
+        public CapsuleToggleSwitch()
+        {
+            this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            this.Size = new Size(76, 30);
+            this.Cursor = Cursors.Hand;
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+
+            if (Parent != null)
+            {
+                using (Brush parentBrush = new SolidBrush(Parent.BackColor))
+                    e.Graphics.FillRectangle(parentBrush, this.ClientRectangle);
+            }
+
+            int w = this.Width - 2;
+            int h = this.Height - 2;
+            Rectangle rect = new Rectangle(1, 1, w, h);
+
+            Color pillColor = isOn ? Color.FromArgb(46, 164, 79) : Color.FromArgb(196, 49, 56);
+
+            using (GraphicsPath path = new GraphicsPath())
+            {
+                path.AddArc(rect.X, rect.Y, h, h, 90, 180);
+                path.AddArc(rect.Right - h, rect.Y, h, h, 270, 180);
+                path.CloseFigure();
+
+                using (Brush bgBrush = new SolidBrush(pillColor))
+                    e.Graphics.FillPath(bgBrush, path);
+            }
+
+            int pad = 3;
+            int knobSize = h - (pad * 2);
+            int knobX = isOn ? (rect.Right - knobSize - pad) : (rect.X + pad);
+            int knobY = rect.Y + pad;
+
+            using (Brush knobBrush = new SolidBrush(Color.White))
+            {
+                e.Graphics.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
+            }
+
+            string labelText = isOn ? "ON" : "OFF";
+            using (Font f = new Font("Segoe UI", 8.5f, FontStyle.Bold))
+            {
+                Rectangle textRect = isOn
+                    ? new Rectangle(rect.X + 6, rect.Y, w - knobSize - 8, h)
+                    : new Rectangle(rect.X + knobSize + 4, rect.Y, w - knobSize - 8, h);
+
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    labelText,
+                    f,
+                    textRect,
+                    Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+                );
+            }
+        }
+    }
   
     // ========================================================================  
     // CABIN ORDER DATA MODEL  
