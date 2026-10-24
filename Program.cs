@@ -2521,7 +2521,21 @@ namespace LabTools
   
             try  
             {  
-                Directory.CreateDirectory(destinationDir);  
+                Directory.CreateDirectory(destinationDir);
+
+if (description == "USB Drive")
+{
+    try
+    {
+        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Realese.jpg");
+        if (File.Exists(copyrightSrc))
+        {
+            string copyrightDest = Path.Combine(destinationDir, "Copyright Realese.jpg");
+            File.Copy(copyrightSrc, copyrightDest, true);
+        }
+    }
+    catch  }
+}
                 int copied = 0;
 
                 await Task.Run(() =>
@@ -2600,7 +2614,8 @@ namespace LabTools
             };  
   
             int y = 20;  
-            AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);  
+            AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);
+            AddSettingRow(settingsForm, "Copyright Folder:", config.CopyrightFolder, ref y, (val) => config.CopyrightFolder = val);
             AddSettingRow(settingsForm, "Orders Folder:", config.OrdersFolder, ref y, (val) => config.OrdersFolder = val);  
             AddSettingRow(settingsForm, "Downloads Folder:", config.DownloadsFolder, ref y, (val) => config.DownloadsFolder = val);  
             AddSettingRow(settingsForm, "Bordered Prints:", string.IsNullOrWhiteSpace(config.BorderedPrintsFolder) ? @"Z:\PixelsOrder\Prints" : config.BorderedPrintsFolder, ref y, (val) => config.BorderedPrintsFolder = val);  
