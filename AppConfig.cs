@@ -21,6 +21,7 @@ namespace LabTools
         public string MachineD { get; set; } = @"Z:\MachineD";
         public string CurrentVoyage { get; set; } = "PO101126";
         public List<string> MediaSizes { get; set; } = new List<string>();
+        public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Misc";
 
         private static readonly string ConfigFilePath = "config.json";
 
