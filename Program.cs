@@ -2633,6 +2633,7 @@ namespace LabTools
             btnMediaSizes.Click += (s, e) => {
                 using (var smf = new MediaSizeManagerForm()) {
                     smf.ShowDialog(settingsForm);
+                    config = AppConfig.Load();
                     LoadMediaSizes();
                     LoadCustomTemplates();
                 }
