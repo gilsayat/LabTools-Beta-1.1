@@ -13,6 +13,7 @@ namespace LabTools
         public string BorderedPrintsFolder { get; set; } = @"Z:\PixelsOrder\Prints";
         public string PrintshopFolder { get; set; } = @"Z:\PhotoLab\Printshop";
         public string HubAppCanvasFolder { get; set; } = @"Z:\PixelsOrder\HubAppCanvas";
+        public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Misc";
         public string CCFolder { get; set; } = @"Z:\CC";
         public string DestinationForWhiteImages { get; set; } = @"Z:\WhiteImages";
         public string MachineA { get; set; } = @"Z:\MachineA";
@@ -21,7 +22,6 @@ namespace LabTools
         public string MachineD { get; set; } = @"Z:\MachineD";
         public string CurrentVoyage { get; set; } = "PO101126";
         public List<string> MediaSizes { get; set; } = new List<string>();
-        public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Misc";
 
         private static readonly string ConfigFilePath = "config.json";
 
@@ -40,28 +40,9 @@ namespace LabTools
                     }
                 }
 
-                // Clean up legacy text files if they exist and migrate values
-                if (File.Exists("HubAppCanvasFolder.txt"))
-                {
-                    string legacyPath = File.ReadAllText("HubAppCanvasFolder.txt").Trim();
-                    if (!string.IsNullOrWhiteSpace(legacyPath)) config.HubAppCanvasFolder = legacyPath;
-                    try { File.Delete("HubAppCanvasFolder.txt"); } catch { }
-                    config.Save();
-                }
-
-                if (File.Exists("MediaSizes.txt"))
-                {
-                    var lines = new List<string>();
-                    foreach (var line in File.ReadAllLines("MediaSizes.txt"))
-                    {
-                        string s = line.Trim();
-                        if (!string.IsNullOrEmpty(s) && !lines.Contains(s, StringComparer.OrdinalIgnoreCase))
-                            lines.Add(s);
-                    }
-                    if (lines.Count > 0) config.MediaSizes = lines;
-                    try { File.Delete("MediaSizes.txt"); } catch { }
-                    config.Save();
-                }
+                // Clean up any legacy text files if they exist
+                if (File.Exists("HubAppCanvasFolder.txt")) { try { File.Delete("HubAppCanvasFolder.txt"); } catch { } }
+                if (File.Exists("MediaSizes.txt")) { try { File.Delete("MediaSizes.txt"); } catch { } }
             }
             catch { }
 
