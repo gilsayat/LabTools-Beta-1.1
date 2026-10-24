@@ -695,11 +695,11 @@ namespace LabTools
             try
             {
                 hubCanvasWatcher?.Dispose();
-                if (!string.IsNullOrWhiteSpace(hubAppCanvasFolder))
+                if (!string.IsNullOrWhiteSpace(config.HubAppCanvasFolder))
                 {
-                    if (Directory.Exists(hubAppCanvasFolder))
+                    if (Directory.Exists(config.HubAppCanvasFolder))
                     {
-                        hubCanvasWatcher = new FileSystemWatcher(hubAppCanvasFolder)
+                        hubCanvasWatcher = new FileSystemWatcher(config.HubAppCanvasFolder)
                         {
                             IncludeSubdirectories = false,
                             NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
@@ -730,9 +730,9 @@ namespace LabTools
             try
             {
                 var items = new List<HubCanvasItem>();
-                if (!string.IsNullOrWhiteSpace(hubAppCanvasFolder) && Directory.Exists(hubAppCanvasFolder))
+                if (!string.IsNullOrWhiteSpace(config.HubAppCanvasFolder) && Directory.Exists(config.HubAppCanvasFolder))
                 {
-                    var files = Directory.EnumerateFiles(hubAppCanvasFolder, "*.*", SearchOption.TopDirectoryOnly)
+                    var files = Directory.EnumerateFiles(config.HubAppCanvasFolder, "*.*", SearchOption.TopDirectoryOnly)
                                          .Where(f => ImageExtensions.Contains(Path.GetExtension(f)))
                                          .OrderByDescending(f => File.GetCreationTime(f));
 
@@ -926,7 +926,7 @@ namespace LabTools
 
                 File.Copy(item.FullPath, printshopDestPath, true);
 
-                string parentDir = Path.GetDirectoryName(item.FullPath) ?? hubAppCanvasFolder;
+                string parentDir = Path.GetDirectoryName(item.FullPath) ?? config.HubAppCanvasFolder;
                 string doneDir = Path.Combine(parentDir, "Done");
                 Directory.CreateDirectory(doneDir);
                 string doneFilePath = Path.Combine(doneDir, item.FileName);
@@ -2521,21 +2521,22 @@ namespace LabTools
   
             try  
             {  
-                Directory.CreateDirectory(destinationDir);
+                Directory.CreateDirectory(destinationDir);  
 
-if (description == "USB Drive")
-{
-    try
-    {
-        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Realese.jpg");
-        if (File.Exists(copyrightSrc))
-        {
-            string copyrightDest = Path.Combine(destinationDir, "Copyright Realese.jpg");
-            File.Copy(copyrightSrc, copyrightDest, true);
-        }
-    }
-    catch { }
-}
+                if (description == "USB Drive")
+                {
+                    try
+                    {
+                        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Realese.jpg");
+                        if (File.Exists(copyrightSrc))
+                        {
+                            string copyrightDest = Path.Combine(destinationDir, "Copyright Realese.jpg");
+                            File.Copy(copyrightSrc, copyrightDest, true);
+                        }
+                    }
+                    catch { }
+                }
+
                 int copied = 0;
 
                 await Task.Run(() =>
@@ -2605,7 +2606,7 @@ if (description == "USB Drive")
             Form settingsForm = new Form()  
             {  
                 Text = AppTitle + " - Settings & HotFolder Paths",  
-                Size = new Size(690, 695),  
+                Size = new Size(690, 735),  
                 StartPosition = FormStartPosition.CenterParent,  
                 BackColor = darkBackground,  
                 FormBorderStyle = FormBorderStyle.FixedDialog,  
@@ -2614,13 +2615,13 @@ if (description == "USB Drive")
             };  
   
             int y = 20;  
-            AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);
-            AddSettingRow(settingsForm, "Copyright Folder:", config.CopyrightFolder, ref y, (val) => config.CopyrightFolder = val);
+            AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);  
             AddSettingRow(settingsForm, "Orders Folder:", config.OrdersFolder, ref y, (val) => config.OrdersFolder = val);  
             AddSettingRow(settingsForm, "Downloads Folder:", config.DownloadsFolder, ref y, (val) => config.DownloadsFolder = val);  
             AddSettingRow(settingsForm, "Bordered Prints:", string.IsNullOrWhiteSpace(config.BorderedPrintsFolder) ? @"Z:\PixelsOrder\Prints" : config.BorderedPrintsFolder, ref y, (val) => config.BorderedPrintsFolder = val);  
             AddSettingRow(settingsForm, "Printshop Folder:", config.PrintshopFolder, ref y, (val) => config.PrintshopFolder = val);  
-            AddSettingRow(settingsForm, "HubApp Canvas Order:", hubAppCanvasFolder, ref y, (val) => hubAppCanvasFolder = val);
+            AddSettingRow(settingsForm, "HubApp Canvas Order:", config.HubAppCanvasFolder, ref y, (val) => config.HubAppCanvasFolder = val);
+            AddSettingRow(settingsForm, "Copyright Folder:", config.CopyrightFolder, ref y, (val) => config.CopyrightFolder = val);
             AddSettingRow(settingsForm, "CC Folder:", config.CCFolder, ref y, (val) => config.CCFolder = val);  
             AddSettingRow(settingsForm, "White Images:", config.DestinationForWhiteImages, ref y, (val) => config.DestinationForWhiteImages = val);  
             AddSettingRow(settingsForm, "Machine A:", config.MachineA, ref y, (val) => config.MachineA = val);  
