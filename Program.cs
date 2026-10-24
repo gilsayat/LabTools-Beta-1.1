@@ -2534,7 +2534,7 @@ if (description == "USB Drive")
             File.Copy(copyrightSrc, copyrightDest, true);
         }
     }
-    catch  }
+    catch { }
 }
                 int copied = 0;
 
