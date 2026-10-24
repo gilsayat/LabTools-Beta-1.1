@@ -349,7 +349,7 @@ namespace LabTools
             if (!string.IsNullOrEmpty(currentSelection) && cmbPrintSizeInput.Items.Contains(currentSelection))
                 cmbPrintSizeInput.Text = currentSelection;
             else if (cmbPrintSizeInput.Items.Count > 0)
-                cmbPrintSizeInput.Text = cmbPrintSizeInput.Items.Contains("4-Wallets (vert)") ? "4-Wallets (vert)" : cmbPrintSizeInput.Items[0].ToString();
+                cmbPrintSizeInput.Text = cmbPrintSizeInput.Items.Contains("4-Wallets (vert)") ? "4-Wallets (vert)" : cmbPrintSizeInput.Items[0].ToString()!;
         }
   
         private void CheckLatestDownloadOrder()  
@@ -579,7 +579,7 @@ namespace LabTools
             picLogo = new PictureBox() { Location = new Point(15, 15), Width = 280, Height = 210, BackColor = Color.FromArgb(18, 19, 22), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
   
-            // 1. DIGITAL ORDER MONITOR (Moved up into the old Crop Guide space)
+            // 1. DIGITAL ORDER MONITOR
             Panel alertBox = new Panel() { Location = new Point(15, 232), Width = 280, Height = 85, BackColor = Color.FromArgb(30, 31, 35), BorderStyle = BorderStyle.FixedSingle };  
             Label lblOrderHeader = new Label() { Text = "DIGITAL ORDER MONITOR", Location = new Point(5, 6), Width = 268, ForeColor = Color.LightGray, Font = new Font("Segoe UI", 7.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleCenter };  
             lblLastOrder = new Label() { Text = "Waiting for orders...", Location = new Point(5, 28), Width = 268, Height = 48, ForeColor = textWhite, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
@@ -617,7 +617,7 @@ namespace LabTools
                 }
             };
 
-            // 3. CABIN ORDERS SECTION (Bottom Box with Reduced Height)
+            // 3. CABIN ORDERS SECTION
             lblCabinOrdersHeader = new Label() { Text = "CABIN ORDERS (0)", Location = new Point(15, 516), Width = 280, Height = 18, ForeColor = Color.FromArgb(130, 220, 210), Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft };
             lstCabinOrders = new ListBox() { Location = new Point(15, 536), Width = 280, Height = 152, BackColor = Color.FromArgb(30, 31, 35), ForeColor = textWhite, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
             lstCabinOrders.SelectedIndexChanged += (s, e) => {
@@ -773,7 +773,6 @@ namespace LabTools
             string photoName = baseName;
             string seller = "APP";
 
-            // Expected format: 9245_16x20_P057677026_APP.jpg
             if (parts.Length >= 4)
             {
                 cabin = parts[0].Trim();
@@ -1269,16 +1268,9 @@ namespace LabTools
             lstFiles.EndUpdate();
 
             if (!string.IsNullOrEmpty(order.Cabin)) txtCabin.Text = order.Cabin;
-            if (!string.IsNullOrEmpty(order.PrintSize))
-            {
-                string cleanSize = order.PrintSize.Replace(" + Auto 4W", "").Replace(" (Canvas Copy)", "").Replace(" (canvas copy)", "");
-                if (!cmbPrintSizeInput.Items.Contains(cleanSize)) cmbPrintSizeInput.Items.Add(cleanSize);
-                cmbPrintSizeInput.Text = cleanSize;
-            }
-            if (order.Qty >= numPrintQty.Minimum && order.Qty <= numPrintQty.Maximum)
-            {
-                numPrintQty.Value = order.Qty;
-            }
+
+            // Keep Qty at 1 and preserve the operator's currently selected Media Size
+            numPrintQty.Value = 1;
 
             lblFilesFound.Text = lstFiles.Items.Count + " Files Total";
             SetStatus($"Imported {addedCount} photo(s) from Order {order.OrderId} for Cabin {order.Cabin}.");
@@ -1730,31 +1722,11 @@ namespace LabTools
                 lstFiles.EndUpdate();  
   
                 if (!string.IsNullOrEmpty(searchResult.Cabin)) txtCabin.Text = searchResult.Cabin;  
-                if (!string.IsNullOrEmpty(searchResult.Size))  
-                {  
-                    if (customTemplates.ContainsKey(searchResult.Size))  
-                    {  
-                        cmbPrintSizeInput.Text = searchResult.Size;  
-                    }  
-                    else if (searchResult.Size.IndexOf("mini porthole", StringComparison.OrdinalIgnoreCase) >= 0)  
-                    {  
-                        cmbPrintSizeInput.Text = "8X10 Mini PORTHOLE";  
-                    }  
-                    else if (searchResult.Size.IndexOf("porthole", StringComparison.OrdinalIgnoreCase) >= 0 ||  
-                             searchResult.Size.IndexOf("port hole", StringComparison.OrdinalIgnoreCase) >= 0)  
-                    {  
-                        cmbPrintSizeInput.Text = "8x10 PORTHOLE 8in";  
-                    }  
-                    else  
-                    {  
-                        if (!cmbPrintSizeInput.Items.Contains(searchResult.Size)) cmbPrintSizeInput.Items.Add(searchResult.Size);  
-                        cmbPrintSizeInput.Text = searchResult.Size;  
-                    }  
-                }  
                 lblFilesFound.Text = count + " Files Found";  
   
                 if (searchResult.IsOrder)  
                 {  
+                    numPrintQty.Value = 1;
                     SetStatus("Found Order " + searchResult.OrderId + " with " + count + " photo(s) (ready to print).");  
                 }  
                 else  
@@ -2013,16 +1985,73 @@ namespace LabTools
                 MessageBox.Show("Import Error: " + ex.Message, "Import Failed", MessageBoxButtons.OK, MessageBoxIcon.Error);  
             }  
         }  
+
+        // ========================================================================  
+        // SMART PRINT TICKET BLOCK BUILDER ("Combo" vs "and" + Custom Rules)
+        // ========================================================================  
+        private void AppendPrintBlocksForItem(StringBuilder sb, string sizeName, int qty, string mediaType, string filePath, bool appendAuto4W, bool isFlattenedBorder)
+        {
+            if (isFlattenedBorder)
+            {
+                sb.AppendLine("Qty=" + qty);
+                sb.AppendLine("Size=8x10");
+                sb.AppendLine("PrintName=8x10");
+                sb.AppendLine("Media=" + mediaType);
+                sb.AppendLine("FilePath=" + filePath);
+                sb.AppendLine();
+
+                if (appendAuto4W)
+                {
+                    sb.AppendLine("Qty=" + qty);
+                    sb.AppendLine("Size=4-Wallets (vert)");
+                    sb.AppendLine("PrintName=4-Wallets (vert)");
+                    sb.AppendLine("Media=Glossy");
+                    sb.AppendLine("FilePath=" + filePath);
+                    sb.AppendLine();
+                }
+                return;
+            }
+
+            MediaSizeRule rule = config.GetEffectiveRule(sizeName);
+
+            // Block 1
+            sb.AppendLine("Qty=" + qty);
+            sb.AppendLine("Size=" + rule.Block1Size);
+            sb.AppendLine("PrintName=" + rule.Block1PrintName);
+            sb.AppendLine("Media=" + mediaType);
+            sb.AppendLine("FilePath=" + filePath);
+            sb.AppendLine();
+
+            // Block 2 (When Multi-Block / "and" rule is active)
+            if (rule.IsMultiBlock && !string.IsNullOrWhiteSpace(rule.Block2Size))
+            {
+                sb.AppendLine("Qty=" + qty);
+                sb.AppendLine("Size=" + rule.Block2Size);
+                sb.AppendLine("PrintName=" + (string.IsNullOrWhiteSpace(rule.Block2PrintName) ? rule.Block2Size : rule.Block2PrintName));
+                sb.AppendLine("Media=" + mediaType);
+                sb.AppendLine("FilePath=" + filePath);
+                sb.AppendLine();
+            }
+            else if (appendAuto4W)
+            {
+                sb.AppendLine("Qty=" + qty);
+                sb.AppendLine("Size=4-Wallets (vert)");
+                sb.AppendLine("PrintName=4-Wallets (vert)");
+                sb.AppendLine("Media=Glossy");
+                sb.AppendLine("FilePath=" + filePath);
+                sb.AppendLine();
+            }
+        }
   
         // ========================================================================  
         // PRINT DISPATCH  
         // ========================================================================  
-        private async void ExecutePrintJobAsync()  
+        private void ExecutePrintJobAsync()  
         {  
             try  
             {  
                 string machineTargetFolder = config.MachineC;   
-                string selectedMachine = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString() : "Machine C";  
+                string selectedMachine = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString()! : "Machine C";  
   
                 if (selectedMachine == "Machine A") machineTargetFolder = config.MachineA;  
                 else if (selectedMachine == "Machine B") machineTargetFolder = config.MachineB;  
@@ -2038,14 +2067,17 @@ namespace LabTools
                 string printSize = cmbPrintSizeInput.Text.Trim();  
                 if (string.IsNullOrEmpty(printSize)) printSize = "4-Wallets (vert)";  
 
+                MediaSizeRule activeRule = config.GetEffectiveRule(printSize);
                 bool isWalletSize = printSize.IndexOf("wallet", StringComparison.OrdinalIgnoreCase) >= 0 ||   
-                                    printSize.IndexOf("4w", StringComparison.OrdinalIgnoreCase) >= 0;  
+                                    printSize.IndexOf("4w", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                    activeRule.IsMultiBlock;  
                 bool appendAuto4W = chkAuto4W.Checked && !isWalletSize;  
   
                 string ticketPrintSize = printSize;  
                 bool isCustomTemplate = customTemplates.ContainsKey(printSize);  
                 bool isPortHole = printSize.IndexOf("porthole", StringComparison.OrdinalIgnoreCase) >= 0 && printSize.IndexOf("mini", StringComparison.OrdinalIgnoreCase) < 0;  
                 bool isMiniPortHole = printSize.IndexOf("mini porthole", StringComparison.OrdinalIgnoreCase) >= 0;  
+                bool isFlattenedBorder = false;
   
                 if (isCustomTemplate) ticketPrintSize = printSize;   
                 else if (isPortHole) ticketPrintSize = "8x10 Port Hole";  
@@ -2113,6 +2145,7 @@ namespace LabTools
                     }  
                     checkedItems = finalFilesToPrint;  
                     ticketPrintSize = "8x10";   
+                    isFlattenedBorder = true;
                 }  
   
                 string mediaType = "Glossy";  
@@ -2129,22 +2162,7 @@ namespace LabTools
   
                 foreach (var item in checkedItems)  
                 {  
-                    sb.AppendLine("Qty=" + qty);  
-                    sb.AppendLine("Size=" + ticketPrintSize);  
-                    sb.AppendLine("PrintName=" + ticketPrintSize);  
-                    sb.AppendLine("Media=" + mediaType);  
-                    sb.AppendLine("FilePath=" + item.FullPath);  
-                    sb.AppendLine();  
-                      
-                    if (appendAuto4W)  
-                    {  
-                        sb.AppendLine("Qty=" + qty);  
-                        sb.AppendLine("Size=4-Wallets (vert)");  
-                        sb.AppendLine("PrintName=4-Wallets (vert)");  
-                        sb.AppendLine("Media=Glossy");  
-                        sb.AppendLine("FilePath=" + item.FullPath);  
-                        sb.AppendLine();  
-                    }  
+                    AppendPrintBlocksForItem(sb, printSize, qty, mediaType, item.FullPath, appendAuto4W, isFlattenedBorder);
                 }  
   
                 string orderId = GetNext7CharOrderId();  
@@ -2154,7 +2172,7 @@ namespace LabTools
                 Program.SafeWriteAllText(tempFilePath, sb.ToString());  
                 File.Move(tempFilePath, finalFilePath);  
   
-                string auditSize = isCustomTemplate ? printSize : ticketPrintSize;  
+                string auditSize = isCustomTemplate ? printSize : (isFlattenedBorder ? ticketPrintSize : printSize);  
                 if (appendAuto4W) auditSize += " + Auto 4W";  
                   
                 List<string> fileNamesToLog = checkedItems.Select(x => x.FileName).ToList();  
@@ -2357,7 +2375,7 @@ namespace LabTools
   
         private async void CheckMachineHealthAsync()  
         {  
-            string selected = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString() : "Machine C";  
+            string selected = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString()! : "Machine C";  
             string path = config.MachineC;  
             if (selected == "Machine A") path = config.MachineA;  
             else if (selected == "Machine B") path = config.MachineB;  
@@ -2410,7 +2428,7 @@ namespace LabTools
                 string cabin = txtCanvasCabin.Text.Trim();  
                 if (string.IsNullOrWhiteSpace(cabin)) { MessageBox.Show("Please enter a cabin number for canvas order.", "Missing Cabin", MessageBoxButtons.OK, MessageBoxIcon.Warning); txtCanvasCabin.Focus(); return; }  
   
-                string size = cmbCanvasSize.SelectedItem != null ? cmbCanvasSize.SelectedItem.ToString() : "16x20";  
+                string size = cmbCanvasSize.SelectedItem != null ? cmbCanvasSize.SelectedItem.ToString()! : "16x20";  
                 string seller = txtSeller.Text.Trim();  
                 if (string.IsNullOrEmpty(seller)) seller = "FREE";  
   
@@ -2443,7 +2461,7 @@ namespace LabTools
                 if (dr == DialogResult.Yes)  
                 {  
                     string machineTargetFolder = config.MachineC;   
-                    string selectedMachine = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString() : "Machine C";  
+                    string selectedMachine = cmbMachine.SelectedItem != null ? cmbMachine.SelectedItem.ToString()! : "Machine C";  
   
                     if (selectedMachine == "Machine A") machineTargetFolder = config.MachineA;  
                     else if (selectedMachine == "Machine B") machineTargetFolder = config.MachineB;  
@@ -2477,8 +2495,11 @@ namespace LabTools
                     string tempFilePath = Path.Combine(machineTargetFolder, orderId + ".tmp");  
                     string finalFilePath = Path.Combine(machineTargetFolder, orderId + ".txt");  
   
-                    Program.SafeWriteAllText(tempFilePath, sb.ToString());  
-                    File.Move(tempFilePath, finalFilePath);  
+                    await Task.Run(() =>
+                    {
+                        Program.SafeWriteAllText(tempFilePath, sb.ToString());  
+                        File.Move(tempFilePath, finalFilePath);  
+                    });
   
                     List<string> fileNamesToLog = checkedItems.Select(x => Path.GetFileName(x.FullPath)).ToList();  
                     LogOrderToAuditHistory(orderId, cabin, selectedMachine, "8x10", checkedItems.Count, seller, fileNamesToLog);  
@@ -2523,15 +2544,32 @@ namespace LabTools
             {  
                 Directory.CreateDirectory(destinationDir);  
 
-                if (description == "USB Drive")
+                if (description == "USB Drive" && !string.IsNullOrWhiteSpace(config.CopyrightFolder) && Directory.Exists(config.CopyrightFolder))
                 {
                     try
                     {
-                        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Release.jpg");
-                        if (File.Exists(copyrightSrc))
+                        string[] candidateNames = new[] { "Copyright Realese.jpg", "Copyright Release.jpg" };
+                        string? foundCopyright = null;
+
+                        foreach (string cName in candidateNames)
                         {
-                            string copyrightDest = Path.Combine(destinationDir, "Copyright Release.jpg");
-                            File.Copy(copyrightSrc, copyrightDest, true);
+                            string candidatePath = Path.Combine(config.CopyrightFolder, cName);
+                            if (File.Exists(candidatePath))
+                            {
+                                foundCopyright = candidatePath;
+                                break;
+                            }
+                        }
+
+                        if (foundCopyright == null)
+                        {
+                            foundCopyright = Directory.EnumerateFiles(config.CopyrightFolder, "*Copyright*.*", SearchOption.TopDirectoryOnly).FirstOrDefault();
+                        }
+
+                        if (!string.IsNullOrEmpty(foundCopyright) && File.Exists(foundCopyright))
+                        {
+                            string copyrightDest = Path.Combine(destinationDir, Path.GetFileName(foundCopyright));
+                            File.Copy(foundCopyright, copyrightDest, true);
                         }
                     }
                     catch { }
@@ -2631,9 +2669,8 @@ namespace LabTools
   
             Button btnMediaSizes = new Button() { Text = "Manage Media Sizes", Location = new Point(20, y + 15), Width = 175, Height = 36, BackColor = panelBackground, ForeColor = textWhite, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
             btnMediaSizes.Click += (s, e) => {
-                using (var smf = new MediaSizeManagerForm()) {
+                using (var smf = new MediaSizeManagerForm(config)) {
                     smf.ShowDialog(settingsForm);
-                    config = AppConfig.Load();
                     LoadMediaSizes();
                     LoadCustomTemplates();
                 }
@@ -2651,6 +2688,8 @@ namespace LabTools
             btnSave.Click += (s, e) =>  
             {  
                 config.Save();
+                LoadMediaSizes();
+                LoadCustomTemplates();
                 SetupFolderWatcher();
                 SetupPrintshopWatcher();
                 SetupHubCanvasWatcher();
@@ -2820,17 +2859,12 @@ namespace LabTools
                     string orderId = item.SubItems[1].Text;  
                     string cabin = item.SubItems[2].Text;  
                     string machine = item.SubItems[3].Text;  
-                    string size = item.SubItems[4].Text;  
-                    string qtyStr = item.SubItems[5].Text;  
   
                     txtCabin.Text = cabin;  
                     if (cmbMachine.Items.Contains(machine)) cmbMachine.SelectedItem = machine;  
-                      
-                    string cleanSize = size.Replace(" + Auto 4W", "").Replace(" (Canvas Copy)", "").Replace(" (canvas copy)", "");  
-                    if (!cmbPrintSizeInput.Items.Contains(cleanSize)) cmbPrintSizeInput.Items.Add(cleanSize);  
-                    cmbPrintSizeInput.SelectedItem = cleanSize;  
-                      
-                    if (int.TryParse(qtyStr, out int q)) numPrintQty.Value = Math.Max(numPrintQty.Minimum, Math.Min(q, numPrintQty.Maximum));  
+
+                    // Keep Qty at 1 and preserve the operator's currently selected Media Size
+                    numPrintQty.Value = 1;  
   
                     string voyageName = GetNetworkVoyage();  
                     string historyPath = Path.Combine(!string.IsNullOrWhiteSpace(config.OrdersFolder) ? config.OrdersFolder : @"Z:\PixelsOrder\Processed", voyageName + " Print History.csv");  
@@ -2872,7 +2906,7 @@ namespace LabTools
                         string size = item.SubItems[4].Text;  
                         string qtyStr = item.SubItems[5].Text;  
                           
-                        int qty = int.TryParse(qtyStr, out int q) ? q : 1;  
+                        int totalLoggedQty = int.TryParse(qtyStr, out int q) ? q : 1;  
                           
                         string voyageName = GetNetworkVoyage();  
                         string historyPath = Path.Combine(!string.IsNullOrWhiteSpace(config.OrdersFolder) ? config.OrdersFolder : @"Z:\PixelsOrder\Processed", voyageName + " Print History.csv");  
@@ -2934,23 +2968,10 @@ namespace LabTools
                           
                         string cleanSize = size.Replace(" + Auto 4W", "").Replace(" (Canvas Copy)", "").Replace(" (canvas copy)", "");  
                         bool appendAuto4W = size.Contains("+ Auto 4W");  
+                        int perPhotoQty = Math.Max(1, totalLoggedQty / Math.Max(1, foundPaths.Count));
   
                         foreach (var path in foundPaths) {  
-                            sb.AppendLine("Qty=" + qty);  
-                            sb.AppendLine("Size=" + cleanSize);  
-                            sb.AppendLine("PrintName=" + cleanSize);  
-                            sb.AppendLine("Media=Glossy");  
-                            sb.AppendLine("FilePath=" + path);  
-                            sb.AppendLine();  
-                              
-                            if (appendAuto4W) {  
-                                sb.AppendLine("Qty=" + qty);  
-                                sb.AppendLine("Size=4-Wallets (vert)");  
-                                sb.AppendLine("PrintName=4-Wallets (vert)");  
-                                sb.AppendLine("Media=Glossy");  
-                                sb.AppendLine("FilePath=" + path);  
-                                sb.AppendLine();  
-                            }  
+                            AppendPrintBlocksForItem(sb, cleanSize, perPhotoQty, "Glossy", path, appendAuto4W, false);
                         }  
                           
                         string newOrderId = GetNext7CharOrderId();  
@@ -2959,7 +2980,7 @@ namespace LabTools
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());  
                         File.Move(tempFilePath, finalFilePath);  
                           
-                        LogOrderToAuditHistory(newOrderId, cabin, machine, size, foundPaths.Count * qty, "REPRINT", targetFiles);  
+                        LogOrderToAuditHistory(newOrderId, cabin, machine, size, foundPaths.Count * perPhotoQty, "REPRINT", targetFiles);  
                           
                         MessageBox.Show("Instant reprint successfully dispatched as Order " + newOrderId, "Reprint Sent", MessageBoxButtons.OK, MessageBoxIcon.Information);  
                         loadHistory();  
@@ -3323,96 +3344,437 @@ namespace LabTools
     }
 
     // ========================================================================  
-    // MEDIA SIZE MANAGER FORM  
+    // MEDIA SIZE MANAGER FORM (SINGLE "COMBO" VS MULTI-BLOCK "AND" CONFIGURATOR)
     // ========================================================================  
     public class MediaSizeManagerForm : Form
     {
+        private AppConfig config;
         private ListBox lstSizes;
         private TextBox txtNewSize;
+        private RadioButton rbSingleBlock;
+        private RadioButton rbMultiBlock;
+        private TextBox txtBlock1Size;
+        private TextBox txtBlock1PrintName;
+        private TextBox txtBlock2Size;
+        private TextBox txtBlock2PrintName;
+        private Label lblBlock2Header;
+        private Label lblBlock2Size;
+        private Label lblBlock2Print;
+        private bool isPopulatingFields = false;
 
-        public MediaSizeManagerForm()
+        private class SizeListItem
         {
+            public string Name { get; set; } = "";
+            public string Display { get; set; } = "";
+            public override string ToString() => Display;
+        }
+
+        public MediaSizeManagerForm(AppConfig activeConfig)
+        {
+            this.config = activeConfig;
             this.Text = "Manage Media Print Sizes";
-            this.Size = new Size(460, 430);
+            this.Size = new Size(620, 540);
             this.StartPosition = FormStartPosition.CenterParent;
             this.BackColor = Color.FromArgb(43, 43, 43);
             this.FormBorderStyle = FormBorderStyle.FixedDialog;
             this.MaximizeBox = false;
             this.MinimizeBox = false;
 
-            Label lblInfo = new Label() { Text = "Add or remove available print sizes from the Print Size menu:", Location = new Point(20, 15), AutoSize = true, ForeColor = Color.White, Font = new Font("Segoe UI", 9) };
-
-            lstSizes = new ListBox() { Location = new Point(20, 42), Width = 405, Height = 210, BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White, Font = new Font("Segoe UI", 9.5f) };
-            RefreshList();
-
-            Label lblNew = new Label() { Text = "New Media Size Name (e.g. 10x13 or Metallic 8x10):", Location = new Point(20, 262), AutoSize = true, ForeColor = Color.White };
-            txtNewSize = new TextBox() { Location = new Point(20, 285), Width = 285, Height = 25, Font = new Font("Segoe UI", 9) };
-            
-            Button btnAdd = new Button() { Text = "Add Size", Location = new Point(315, 283), Width = 110, Height = 28, BackColor = Color.FromArgb(17, 122, 114), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
-            btnAdd.Click += (s, e) =>
+            Label lblInfo = new Label()
             {
-                string newSize = txtNewSize.Text.Trim();
-                if (string.IsNullOrWhiteSpace(newSize)) return;
-                var config = AppConfig.Load();
-                if (config.MediaSizes == null) config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
-                if (!config.MediaSizes.Contains(newSize, StringComparer.OrdinalIgnoreCase))
-                {
-                    config.MediaSizes.Add(newSize);
-                    config.Save();
-                    txtNewSize.Clear();
-                    RefreshList();
-                }
+                Text = "Current Media Sizes in Dropdown (Click any size to inspect or edit its order ticket blocks):",
+                Location = new Point(20, 15),
+                AutoSize = true,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
             };
 
-            Button btnRemove = new Button() { Text = "Remove Selected", Location = new Point(20, 330), Width = 150, Height = 34, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9) };
-            btnRemove.Click += (s, e) =>
+            lstSizes = new ListBox()
             {
-                if (lstSizes.SelectedItem is string sel)
-                {
-                    var config = AppConfig.Load();
-                    if (config.MediaSizes != null)
-                    {
-                        config.MediaSizes.RemoveAll(x => x.Equals(sel, StringComparison.OrdinalIgnoreCase));
-                        config.Save();
-                    }
-                    RefreshList();
-                }
+                Location = new Point(20, 38),
+                Width = 565,
+                Height = 175,
+                BackColor = Color.FromArgb(50, 50, 50),
+                ForeColor = Color.White,
+                Font = new Font("Consolas", 9.5f)
+            };
+            lstSizes.SelectedIndexChanged += LstSizes_SelectedIndexChanged;
+
+            Label lblSection = new Label()
+            {
+                Text = "Add / Edit Media Size & Order Ticket Format:",
+                Location = new Point(20, 224),
+                AutoSize = true,
+                ForeColor = Color.FromArgb(130, 220, 210),
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
             };
 
-            Button btnReset = new Button() { Text = "Reset Defaults", Location = new Point(180, 330), Width = 130, Height = 34, BackColor = Color.FromArgb(54, 54, 54), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9) };
-            btnReset.Click += (s, e) =>
+            Label lblNew = new Label()
             {
-                if (MessageBox.Show("Reset media sizes to factory defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-                {
-                    var config = AppConfig.Load();
-                    config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
-                    config.Save();
-                    RefreshList();
-                }
+                Text = "Dropdown Name:",
+                Location = new Point(20, 254),
+                Width = 115,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+            txtNewSize = new TextBox()
+            {
+                Location = new Point(140, 251),
+                Width = 445,
+                Height = 25,
+                Font = new Font("Segoe UI", 9.5f)
+            };
+            txtNewSize.TextChanged += TxtNewSize_TextChanged;
+
+            Label lblOutputMode = new Label()
+            {
+                Text = "Ticket Output:",
+                Location = new Point(20, 288),
+                Width = 115,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
             };
 
-            Button btnClose = new Button() { Text = "Done", Location = new Point(320, 330), Width = 105, Height = 34, BackColor = Color.FromArgb(28, 115, 189), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+            rbSingleBlock = new RadioButton()
+            {
+                Text = "Single Block (\"Combo\" / 1 Paper)",
+                Location = new Point(140, 286),
+                Width = 215,
+                ForeColor = Color.White,
+                Checked = true,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            rbMultiBlock = new RadioButton()
+            {
+                Text = "Multi-Block (\"and\" / Split into 2 Orders)",
+                Location = new Point(360, 286),
+                Width = 235,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            rbSingleBlock.CheckedChanged += (s, e) => UpdateBlock2State();
+            rbMultiBlock.CheckedChanged += (s, e) => UpdateBlock2State();
+
+            // Block 1 Row
+            Label lblBlock1Header = new Label()
+            {
+                Text = "Block 1 ->",
+                Location = new Point(20, 325),
+                Width = 75,
+                ForeColor = Color.FromArgb(120, 240, 150),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            Label lblBlock1Size = new Label()
+            {
+                Text = "Size=",
+                Location = new Point(95, 325),
+                Width = 42,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+            txtBlock1Size = new TextBox()
+            {
+                Location = new Point(140, 322),
+                Width = 175,
+                Height = 25,
+                Font = new Font("Segoe UI", 9)
+            };
+            Label lblBlock1Print = new Label()
+            {
+                Text = "PrintName=",
+                Location = new Point(325, 325),
+                Width = 75,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+            txtBlock1PrintName = new TextBox()
+            {
+                Location = new Point(402, 322),
+                Width = 183,
+                Height = 25,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            // Block 2 Row
+            lblBlock2Header = new Label()
+            {
+                Text = "Block 2 ->",
+                Location = new Point(20, 362),
+                Width = 75,
+                ForeColor = Color.FromArgb(120, 240, 150),
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            lblBlock2Size = new Label()
+            {
+                Text = "Size=",
+                Location = new Point(95, 362),
+                Width = 42,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+            txtBlock2Size = new TextBox()
+            {
+                Location = new Point(140, 359),
+                Width = 175,
+                Height = 25,
+                Font = new Font("Segoe UI", 9)
+            };
+            lblBlock2Print = new Label()
+            {
+                Text = "PrintName=",
+                Location = new Point(325, 362),
+                Width = 75,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 9)
+            };
+            txtBlock2PrintName = new TextBox()
+            {
+                Location = new Point(402, 359),
+                Width = 183,
+                Height = 25,
+                Font = new Font("Segoe UI", 9)
+            };
+
+            Label lblHint = new Label()
+            {
+                Text = "Tip: Names with \"Combo\" stay on 1 block. Names with \"and\" automatically split into 2 blocks.",
+                Location = new Point(20, 398),
+                AutoSize = true,
+                ForeColor = Color.LightGray,
+                Font = new Font("Segoe UI", 8.25f, FontStyle.Italic)
+            };
+
+            Button btnAdd = new Button()
+            {
+                Text = "+ Add / Save Size",
+                Location = new Point(20, 435),
+                Width = 155,
+                Height = 38,
+                BackColor = Color.FromArgb(17, 122, 114),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
+            btnAdd.Click += BtnAdd_Click;
+
+            Button btnRemove = new Button()
+            {
+                Text = "Remove Selected",
+                Location = new Point(185, 435),
+                Width = 140,
+                Height = 38,
+                BackColor = Color.FromArgb(180, 50, 50),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9)
+            };
+            btnRemove.Click += BtnRemove_Click;
+
+            Button btnReset = new Button()
+            {
+                Text = "Reset Defaults",
+                Location = new Point(335, 435),
+                Width = 125,
+                Height = 38,
+                BackColor = Color.FromArgb(54, 54, 54),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9)
+            };
+            btnReset.Click += BtnReset_Click;
+
+            Button btnClose = new Button()
+            {
+                Text = "Done",
+                Location = new Point(470, 435),
+                Width = 115,
+                Height = 38,
+                BackColor = Color.FromArgb(28, 115, 189),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9, FontStyle.Bold)
+            };
             btnClose.Click += (s, e) => this.Close();
 
             this.Controls.Add(lblInfo);
             this.Controls.Add(lstSizes);
+            this.Controls.Add(lblSection);
             this.Controls.Add(lblNew);
             this.Controls.Add(txtNewSize);
+            this.Controls.Add(lblOutputMode);
+            this.Controls.Add(rbSingleBlock);
+            this.Controls.Add(rbMultiBlock);
+            this.Controls.Add(lblBlock1Header);
+            this.Controls.Add(lblBlock1Size);
+            this.Controls.Add(txtBlock1Size);
+            this.Controls.Add(lblBlock1Print);
+            this.Controls.Add(txtBlock1PrintName);
+            this.Controls.Add(lblBlock2Header);
+            this.Controls.Add(lblBlock2Size);
+            this.Controls.Add(txtBlock2Size);
+            this.Controls.Add(lblBlock2Print);
+            this.Controls.Add(txtBlock2PrintName);
+            this.Controls.Add(lblHint);
             this.Controls.Add(btnAdd);
             this.Controls.Add(btnRemove);
             this.Controls.Add(btnReset);
             this.Controls.Add(btnClose);
+
+            RefreshList();
+            UpdateBlock2State();
+        }
+
+        private void UpdateBlock2State()
+        {
+            bool multi = rbMultiBlock.Checked;
+            lblBlock2Header.Enabled = multi;
+            lblBlock2Size.Enabled = multi;
+            txtBlock2Size.Enabled = multi;
+            lblBlock2Print.Enabled = multi;
+            txtBlock2PrintName.Enabled = multi;
+
+            if (multi && string.IsNullOrWhiteSpace(txtBlock2Size.Text))
+            {
+                txtBlock2Size.Text = "4-Wallets (vert)";
+                txtBlock2PrintName.Text = "4-Wallets (vert)";
+            }
+        }
+
+        private void LstSizes_SelectedIndexChanged(object? sender, EventArgs e)
+        {
+            if (lstSizes.SelectedItem is SizeListItem item)
+            {
+                isPopulatingFields = true;
+                MediaSizeRule rule = config.GetEffectiveRule(item.Name);
+                txtNewSize.Text = item.Name;
+                rbMultiBlock.Checked = rule.IsMultiBlock;
+                rbSingleBlock.Checked = !rule.IsMultiBlock;
+                txtBlock1Size.Text = rule.Block1Size;
+                txtBlock1PrintName.Text = rule.Block1PrintName;
+                txtBlock2Size.Text = rule.Block2Size;
+                txtBlock2PrintName.Text = rule.Block2PrintName;
+                UpdateBlock2State();
+                isPopulatingFields = false;
+            }
+        }
+
+        private void TxtNewSize_TextChanged(object? sender, EventArgs e)
+        {
+            if (isPopulatingFields) return;
+
+            string typed = txtNewSize.Text.Trim();
+            if (string.IsNullOrEmpty(typed))
+            {
+                txtBlock1Size.Clear();
+                txtBlock1PrintName.Clear();
+                return;
+            }
+
+            MediaSizeRule autoRule = config.GetEffectiveRule(typed);
+            rbMultiBlock.Checked = autoRule.IsMultiBlock;
+            rbSingleBlock.Checked = !autoRule.IsMultiBlock;
+            txtBlock1Size.Text = autoRule.Block1Size;
+            txtBlock1PrintName.Text = autoRule.Block1PrintName;
+            txtBlock2Size.Text = autoRule.Block2Size;
+            txtBlock2PrintName.Text = autoRule.Block2PrintName;
+            UpdateBlock2State();
+        }
+
+        private void BtnAdd_Click(object? sender, EventArgs e)
+        {
+            string name = txtNewSize.Text.Trim();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                MessageBox.Show("Please enter a Dropdown Name for the media size.", "Missing Name", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            string b1Size = string.IsNullOrWhiteSpace(txtBlock1Size.Text) ? name : txtBlock1Size.Text.Trim();
+            string b1Print = string.IsNullOrWhiteSpace(txtBlock1PrintName.Text) ? b1Size : txtBlock1PrintName.Text.Trim();
+            string b2Size = txtBlock2Size.Text.Trim();
+            string b2Print = string.IsNullOrWhiteSpace(txtBlock2PrintName.Text) ? b2Size : txtBlock2PrintName.Text.Trim();
+
+            if (rbMultiBlock.Checked && string.IsNullOrWhiteSpace(b2Size))
+            {
+                MessageBox.Show("Please enter the Block 2 Size (e.g. 4-Wallets (vert)) for Multi-Block output.", "Missing Block 2", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (config.MediaSizes == null)
+                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+
+            if (!config.MediaSizes.Contains(name, StringComparer.OrdinalIgnoreCase))
+            {
+                config.MediaSizes.Add(name);
+            }
+
+            if (config.MediaSizeRules == null)
+                config.MediaSizeRules = new List<MediaSizeRule>();
+
+            config.MediaSizeRules.RemoveAll(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            config.MediaSizeRules.Add(new MediaSizeRule
+            {
+                Name = name,
+                IsMultiBlock = rbMultiBlock.Checked,
+                Block1Size = b1Size,
+                Block1PrintName = b1Print,
+                Block2Size = rbMultiBlock.Checked ? b2Size : "",
+                Block2PrintName = rbMultiBlock.Checked ? b2Print : ""
+            });
+
+            config.Save();
+            RefreshList();
+        }
+
+        private void BtnRemove_Click(object? sender, EventArgs e)
+        {
+            if (lstSizes.SelectedItem is SizeListItem sel)
+            {
+                config.MediaSizes?.RemoveAll(x => x.Equals(sel.Name, StringComparison.OrdinalIgnoreCase));
+                config.MediaSizeRules?.RemoveAll(r => r.Name.Equals(sel.Name, StringComparison.OrdinalIgnoreCase));
+                config.Save();
+                RefreshList();
+            }
+        }
+
+        private void BtnReset_Click(object? sender, EventArgs e)
+        {
+            if (MessageBox.Show("Reset media sizes and block rules to factory defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            {
+                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+                config.MediaSizeRules = new List<MediaSizeRule>();
+                config.Save();
+                RefreshList();
+            }
         }
 
         private void RefreshList()
         {
             lstSizes.Items.Clear();
-            var config = AppConfig.Load();
-            var sizes = config.MediaSizes;
-            if (sizes == null || sizes.Count == 0) sizes = new List<string>(MainForm.DefaultMediaSizes);
-            foreach (var size in sizes)
+            if (config.MediaSizes == null || config.MediaSizes.Count == 0)
             {
-                lstSizes.Items.Add(size);
+                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+            }
+
+            foreach (var size in config.MediaSizes)
+            {
+                MediaSizeRule rule = config.GetEffectiveRule(size);
+                string tag;
+                if (rule.IsMultiBlock)
+                    tag = $"[2-Blocks: {rule.Block1Size} + {rule.Block2Size}]";
+                else if (size.IndexOf("combo", StringComparison.OrdinalIgnoreCase) >= 0)
+                    tag = "[1-Page Combo]";
+                else
+                    tag = "[Single]";
+
+                string padded = size.Length < 34 ? size.PadRight(34) : size + "  ";
+                lstSizes.Items.Add(new SizeListItem
+                {
+                    Name = size,
+                    Display = $"{padded} {tag}"
+                });
             }
         }
     }
