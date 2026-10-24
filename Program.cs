@@ -39,7 +39,7 @@ namespace LabTools
         [STAThread]  
         static void Main()  
         {  
-            // Single-instance check: only allow one window of LabTools to run at a time
+            // Enforce single-instance execution policy via Windows Mutex
             bool createdNew;
             singleInstanceMutex = new Mutex(true, "LabTools_Beta_SingleInstance_Mutex_GilSayat", out createdNew);
             if (!createdNew)
@@ -161,7 +161,6 @@ namespace LabTools
         };
   
         private AppConfig config = null!;  
-        private string hubAppCanvasFolder = @"Z:\PixelsOrder\HubAppCanvas";
         private TextBox txtSearch = null!;  
         private Button btnFind = null!;  
         private Button btnCancelSearch = null!;  
@@ -297,36 +296,12 @@ namespace LabTools
             config.CurrentVoyage = voyage;  
             config.Save();  
         }  
-
-        private void LoadHubAppCanvasFolderSetting()
-        {
-            try
-            {
-                if (File.Exists("HubAppCanvasFolder.txt"))
-                {
-                    string saved = Program.SafeReadAllLines("HubAppCanvasFolder.txt").FirstOrDefault()?.Trim() ?? "";
-                    if (!string.IsNullOrWhiteSpace(saved))
-                        hubAppCanvasFolder = saved;
-                }
-            }
-            catch { }
-        }
-
-        private void SaveHubAppCanvasFolderSetting()
-        {
-            try
-            {
-                Program.SafeWriteAllText("HubAppCanvasFolder.txt", hubAppCanvasFolder);
-            }
-            catch { }
-        }
   
         public MainForm()  
         {  
             this.DoubleBuffered = true;   
               
             config = AppConfig.Load();  
-            LoadHubAppCanvasFolderSetting();
             InitializeCustomComponent();  
             LoadMediaSizes();
             LoadCustomTemplates();  
@@ -345,29 +320,25 @@ namespace LabTools
             cmbPrintSizeInput.Items.Clear();
             var sizes = new List<string>();
 
-            try
+            if (config.MediaSizes != null && config.MediaSizes.Count > 0)
             {
-                if (File.Exists("MediaSizes.txt"))
+                foreach (var s in config.MediaSizes)
                 {
-                    foreach (var line in Program.SafeReadAllLines("MediaSizes.txt"))
+                    if (!string.IsNullOrEmpty(s) && 
+                        !s.Equals("8x10 (canvas copy)", StringComparison.OrdinalIgnoreCase) && 
+                        !s.Equals("8x10 (Canvas Copy)", StringComparison.OrdinalIgnoreCase))
                     {
-                        string s = line.Trim();
-                        if (!string.IsNullOrEmpty(s) && 
-                            !s.Equals("8x10 (canvas copy)", StringComparison.OrdinalIgnoreCase) && 
-                            !s.Equals("8x10 (Canvas Copy)", StringComparison.OrdinalIgnoreCase))
-                        {
-                            if (!sizes.Contains(s, StringComparer.OrdinalIgnoreCase))
-                                sizes.Add(s);
-                        }
+                        if (!sizes.Contains(s, StringComparer.OrdinalIgnoreCase))
+                            sizes.Add(s);
                     }
                 }
             }
-            catch { }
 
             if (sizes.Count == 0)
             {
                 sizes.AddRange(DefaultMediaSizes);
-                try { Program.SafeWriteAllText("MediaSizes.txt", string.Join(Environment.NewLine, sizes)); } catch { }
+                config.MediaSizes = new List<string>(sizes);
+                config.Save();
             }
 
             foreach (var size in sizes)
@@ -726,27 +697,29 @@ namespace LabTools
                 hubCanvasWatcher?.Dispose();
                 if (!string.IsNullOrWhiteSpace(hubAppCanvasFolder))
                 {
-                    Directory.CreateDirectory(hubAppCanvasFolder);
-                    hubCanvasWatcher = new FileSystemWatcher(hubAppCanvasFolder)
+                    if (Directory.Exists(hubAppCanvasFolder))
                     {
-                        IncludeSubdirectories = false,
-                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
-                    };
+                        hubCanvasWatcher = new FileSystemWatcher(hubAppCanvasFolder)
+                        {
+                            IncludeSubdirectories = false,
+                            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
+                        };
 
-                    FileSystemEventHandler onChange = (s, e) =>
-                    {
-                        if (!IsDisposed && IsHandleCreated)
-                            try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
-                    };
+                        FileSystemEventHandler onChange = (s, e) =>
+                        {
+                            if (!IsDisposed && IsHandleCreated)
+                                try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
+                        };
 
-                    hubCanvasWatcher.Created += onChange;
-                    hubCanvasWatcher.Deleted += onChange;
-                    hubCanvasWatcher.Renamed += (s, e) =>
-                    {
-                        if (!IsDisposed && IsHandleCreated)
-                            try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
-                    };
-                    hubCanvasWatcher.EnableRaisingEvents = true;
+                        hubCanvasWatcher.Created += onChange;
+                        hubCanvasWatcher.Deleted += onChange;
+                        hubCanvasWatcher.Renamed += (s, e) =>
+                        {
+                            if (!IsDisposed && IsHandleCreated)
+                                try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
+                        };
+                        hubCanvasWatcher.EnableRaisingEvents = true;
+                    }
                 }
             }
             catch { }
@@ -769,7 +742,6 @@ namespace LabTools
                     }
                 }
 
-                // Clean up thumbnails for removed files
                 var activePaths = new HashSet<string>(items.Select(i => i.FullPath), StringComparer.OrdinalIgnoreCase);
                 foreach (var key in hubThumbCache.Keys.Where(k => !activePaths.Contains(k)).ToList())
                 {
@@ -919,7 +891,6 @@ namespace LabTools
                 string seller = string.IsNullOrWhiteSpace(item.Seller) ? "APP" : item.Seller;
                 string photoName = string.IsNullOrWhiteSpace(item.PhotoName) ? Path.GetFileNameWithoutExtension(item.FileName) : item.PhotoName;
 
-                // Sync parsed info into UI fields automatically
                 if (!string.IsNullOrEmpty(cabin)) txtCabin.Text = cabin;
                 if (!cmbCanvasSize.Items.Contains(size)) cmbCanvasSize.Items.Add(size);
                 cmbCanvasSize.SelectedItem = size;
@@ -953,11 +924,10 @@ namespace LabTools
                 string newFileName = $"{numPrefix}_{cabin}_{size}_{photoName}_{seller}{ext}";
                 string printshopDestPath = Path.Combine(targetDir, newFileName);
 
-                // 1. Copy to Printshop Folder
                 File.Copy(item.FullPath, printshopDestPath, true);
 
-                // 2. Move original photo to HubApp Canvas Order\Done subfolder
-                string doneDir = Path.Combine(hubAppCanvasFolder, "Done");
+                string parentDir = Path.GetDirectoryName(item.FullPath) ?? hubAppCanvasFolder;
+                string doneDir = Path.Combine(parentDir, "Done");
                 Directory.CreateDirectory(doneDir);
                 string doneFilePath = Path.Combine(doneDir, item.FileName);
 
@@ -974,7 +944,6 @@ namespace LabTools
                 RefreshHubCanvasOrdersList();
                 SetStatus($"Posted Canvas No. {numPrefix} ({newFileName}) and moved original to Done.");
 
-                // 3. Prompt to print 8x10 copy as well
                 DialogResult printDr = MessageBox.Show(
                     $"Successfully posted Canvas No. {numPrefix} to Printshop and moved original to Done.\n\n" +
                     $"Do you want to print the picture posted as an 8x10 print as well?",
@@ -1683,7 +1652,7 @@ namespace LabTools
                                     targetTokens.Remove(tokenName);
                                 }
                             }
-                        }
+                        }  
   
                         if (targetTokens.Count > 0 && Directory.Exists(downloadsDir))  
                         {  
@@ -2665,7 +2634,6 @@ namespace LabTools
             btnSave.Click += (s, e) =>  
             {  
                 config.Save();
-                SaveHubAppCanvasFolderSetting();
                 SetupFolderWatcher();
                 SetupPrintshopWatcher();
                 SetupHubCanvasWatcher();
@@ -3368,11 +3336,12 @@ namespace LabTools
             {
                 string newSize = txtNewSize.Text.Trim();
                 if (string.IsNullOrWhiteSpace(newSize)) return;
-                var current = GetCurrentSizes();
-                if (!current.Contains(newSize, StringComparer.OrdinalIgnoreCase))
+                var config = AppConfig.Load();
+                if (config.MediaSizes == null) config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+                if (!config.MediaSizes.Contains(newSize, StringComparer.OrdinalIgnoreCase))
                 {
-                    current.Add(newSize);
-                    SaveSizes(current);
+                    config.MediaSizes.Add(newSize);
+                    config.Save();
                     txtNewSize.Clear();
                     RefreshList();
                 }
@@ -3383,9 +3352,12 @@ namespace LabTools
             {
                 if (lstSizes.SelectedItem is string sel)
                 {
-                    var current = GetCurrentSizes();
-                    current.RemoveAll(x => x.Equals(sel, StringComparison.OrdinalIgnoreCase));
-                    SaveSizes(current);
+                    var config = AppConfig.Load();
+                    if (config.MediaSizes != null)
+                    {
+                        config.MediaSizes.RemoveAll(x => x.Equals(sel, StringComparison.OrdinalIgnoreCase));
+                        config.Save();
+                    }
                     RefreshList();
                 }
             };
@@ -3395,7 +3367,9 @@ namespace LabTools
             {
                 if (MessageBox.Show("Reset media sizes to factory defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 {
-                    SaveSizes(new List<string>(MainForm.DefaultMediaSizes));
+                    var config = AppConfig.Load();
+                    config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+                    config.Save();
                     RefreshList();
                 }
             };
@@ -3413,31 +3387,13 @@ namespace LabTools
             this.Controls.Add(btnClose);
         }
 
-        private List<string> GetCurrentSizes()
-        {
-            var list = new List<string>();
-            if (File.Exists("MediaSizes.txt"))
-            {
-                foreach (var line in Program.SafeReadAllLines("MediaSizes.txt"))
-                {
-                    string s = line.Trim();
-                    if (!string.IsNullOrEmpty(s) && !list.Contains(s, StringComparer.OrdinalIgnoreCase))
-                        list.Add(s);
-                }
-            }
-            if (list.Count == 0) list.AddRange(MainForm.DefaultMediaSizes);
-            return list;
-        }
-
-        private void SaveSizes(List<string> sizes)
-        {
-            Program.SafeWriteAllText("MediaSizes.txt", string.Join(Environment.NewLine, sizes));
-        }
-
         private void RefreshList()
         {
             lstSizes.Items.Clear();
-            foreach (var size in GetCurrentSizes())
+            var config = AppConfig.Load();
+            var sizes = config.MediaSizes;
+            if (sizes == null || sizes.Count == 0) sizes = new List<string>(MainForm.DefaultMediaSizes);
+            foreach (var size in sizes)
             {
                 lstSizes.Items.Add(size);
             }
