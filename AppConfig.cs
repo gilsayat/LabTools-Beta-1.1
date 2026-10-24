@@ -27,6 +27,8 @@ namespace LabTools
         public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Misc";
         public string CCFolder { get; set; } = @"Z:\CC";
         public string DestinationForWhiteImages { get; set; } = @"Z:\WhiteImages";
+        public string ToPrintFolder { get; set; } = @"Z:\ToPrint";
+        public bool HybridShip { get; set; } = false;
         public string MachineA { get; set; } = @"Z:\MachineA";
         public string MachineB { get; set; } = @"Z:\MachineB";
         public string MachineC { get; set; } = @"Z:\MachineC";
