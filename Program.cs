@@ -2527,10 +2527,10 @@ namespace LabTools
                 {
                     try
                     {
-                        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Realese.jpg");
+                        string copyrightSrc = Path.Combine(config.CopyrightFolder, "Copyright Release.jpg");
                         if (File.Exists(copyrightSrc))
                         {
-                            string copyrightDest = Path.Combine(destinationDir, "Copyright Realese.jpg");
+                            string copyrightDest = Path.Combine(destinationDir, "Copyright Release.jpg");
                             File.Copy(copyrightSrc, copyrightDest, true);
                         }
                     }
