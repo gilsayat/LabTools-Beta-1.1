@@ -1,4 +1,4 @@
-name: Build LabTools Executable
+name: Build LabTools V3.5
 
 on:
   push:
