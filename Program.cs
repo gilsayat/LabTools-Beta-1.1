@@ -981,8 +981,8 @@ SetPlaceholder(txtPrintCabinNum, "cabin");
 lblPrintQty = new Label() { Text = "Qty:", Location = new Point(148, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
 numPrintQty = new NumericUpDown() { Location = new Point(180, 32), Width = 48, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
 
-lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(236, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-cmbPrintSizeInput = new ComboBox() { Location = new Point(272, 32), Width = 300, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
+lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(14, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+cmbPrintSizeInput = new ComboBox() { Location = new Point(52, 61), Width = 238, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
 
 txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
 txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
