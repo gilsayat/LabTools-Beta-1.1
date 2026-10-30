@@ -970,80 +970,81 @@ namespace LabTools
             this.Controls.Add(cardTransfer);
 
             // ========================================================================
-            // LEFT COLUMN — CARD 3: CANVAS ORDER STUDIO (Y=576, Height=96)
+// LEFT COLUMN — PRINT DISPATCH CARD (Now at the top, Y=576)
+// ========================================================================
+cardPrint = new RoundedCardPanel() { Location = new Point(14, 576), Size = new Size(586, 96), Title = "PRINT DISPATCH" };
+
+lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
+txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(60, 32), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+SetPlaceholder(txtPrintCabinNum, "cabin");  
+
+lblPrintQty = new Label() { Text = "Qty:", Location = new Point(148, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
+numPrintQty = new NumericUpDown() { Location = new Point(180, 32), Width = 48, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+
+lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(236, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+cmbPrintSizeInput = new ComboBox() { Location = new Point(272, 32), Width = 300, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
+
+txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
+txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
+txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
+
+chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(16, 63), Width = 82, Height = 24, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
+  
+lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(102, 65), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+cmbOrderType = new ComboBox() { Location = new Point(142, 62), Width = 148, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
+cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
+cmbOrderType.Text = "Package";  
+
+// PRINT button matched to Post Canvas height (Height = 54)
+btnPrint = new Button() { Text = "PRINT", Location = new Point(302, 32), Width = 270, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11f, FontStyle.Bold), Cursor = Cursors.Hand };  
+btnPrint.FlatAppearance.BorderSize = 0;
+btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
+
+cardPrint.Controls.Add(lblPrintCabinLabel);
+cardPrint.Controls.Add(txtPrintCabinNum);
+cardPrint.Controls.Add(lblPrintQty);
+cardPrint.Controls.Add(numPrintQty);
+cardPrint.Controls.Add(lblPrintSizeTag);
+cardPrint.Controls.Add(cmbPrintSizeInput);
+cardPrint.Controls.Add(chkAuto4W);
+cardPrint.Controls.Add(lblOrderTypeTag);
+cardPrint.Controls.Add(cmbOrderType);
+cardPrint.Controls.Add(btnPrint);
+this.Controls.Add(cardPrint);
+
             // ========================================================================
-            cardCanvas = new RoundedCardPanel() { Location = new Point(14, 682), Size = new Size(586, 96), Title = "CANVAS POSTING" };
+// LEFT COLUMN — CANVAS ORDER STUDIO CARD (Now at the bottom, Y=682)
+// ========================================================================
+cardCanvas = new RoundedCardPanel() { Location = new Point(14, 682), Size = new Size(586, 96), Title = "CANVAS ORDER STUDIO" };
 
-            lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };  
+lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };  
 
-            lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(185, 36), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-            txtCanvasCabin = new TextBox() { Text = "", Location = new Point(232, 33), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
-            SetPlaceholder(txtCanvasCabin, "cabin");  
+lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(185, 36), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+txtCanvasCabin = new TextBox() { Text = "", Location = new Point(232, 33), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
+SetPlaceholder(txtCanvasCabin, "cabin");  
 
-            lblCanvasSizeTag = new Label() { Text = "Size:", Location = new Point(14, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-            cmbCanvasSize = new ComboBox() { Location = new Point(52, 61), Width = 122, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
-            cmbCanvasSize.Items.AddRange(new string[] { "16x20", "20x30", "11x14", "8x10" });  
-            cmbCanvasSize.SelectedIndex = 0;  
+lblCanvasSizeTag = new Label() { Text = "Size:", Location = new Point(14, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+cmbCanvasSize = new ComboBox() { Location = new Point(52, 61), Width = 122, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
+cmbCanvasSize.Items.AddRange(new string[] { "16x20", "20x30", "11x14", "8x10" });  
+cmbCanvasSize.SelectedIndex = 0;  
 
-            lblCanvasSellerTag = new Label() { Text = "Seller:", Location = new Point(185, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-            txtSeller = new TextBox() { Text = "", Location = new Point(232, 61), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-            SetPlaceholder(txtSeller, "seller");  
-  
-            btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(372, 32), Width = 200, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), Cursor = Cursors.Hand };  
-            btnPostCanvas.FlatAppearance.BorderSize = 0;
-            btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
+lblCanvasSellerTag = new Label() { Text = "Seller:", Location = new Point(185, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+txtSeller = new TextBox() { Text = "", Location = new Point(232, 61), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+SetPlaceholder(txtSeller, "seller");  
 
-            cardCanvas.Controls.Add(lblCanvasHeader);
-            cardCanvas.Controls.Add(lblCanvasCabinTag);
-            cardCanvas.Controls.Add(txtCanvasCabin);
-            cardCanvas.Controls.Add(lblCanvasSizeTag);
-            cardCanvas.Controls.Add(cmbCanvasSize);
-            cardCanvas.Controls.Add(lblCanvasSellerTag);
-            cardCanvas.Controls.Add(txtSeller);
-            cardCanvas.Controls.Add(btnPostCanvas);
-            this.Controls.Add(cardCanvas);
+btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(372, 32), Width = 200, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), Cursor = Cursors.Hand };  
+btnPostCanvas.FlatAppearance.BorderSize = 0;
+btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
 
-            // ========================================================================
-            // LEFT COLUMN — CARD 4: PRINT DISPATCH (Y=682, Height=96 -> Bottom=778)
-            // ========================================================================
-            cardPrint = new RoundedCardPanel() { Location = new Point(14, 576), Size = new Size(586, 96), Title = "ORDER PRINTING" };
-
-            lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
-            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(60, 32), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-            SetPlaceholder(txtPrintCabinNum, "cabin");  
-  
-            lblPrintQty = new Label() { Text = "Qty:", Location = new Point(148, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
-            numPrintQty = new NumericUpDown() { Location = new Point(180, 32), Width = 48, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-  
-            lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(236, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-            cmbPrintSizeInput = new ComboBox() { Location = new Point(272, 32), Width = 300, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
-  
-            txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
-            txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
-            txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
-  
-            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(16, 63), Width = 82, Height = 24, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
-              
-            lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(102, 65), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-            cmbOrderType = new ComboBox() { Location = new Point(142, 62), Width = 148, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
-            cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
-            cmbOrderType.Text = "Package";  
-  
-            btnPrint = new Button() { Text = "PRINT", Location = new Point(302, 60), Width = 270, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), Cursor = Cursors.Hand };  
-            btnPrint.FlatAppearance.BorderSize = 0;
-            btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
-
-            cardPrint.Controls.Add(lblPrintCabinLabel);
-            cardPrint.Controls.Add(txtPrintCabinNum);
-            cardPrint.Controls.Add(lblPrintQty);
-            cardPrint.Controls.Add(numPrintQty);
-            cardPrint.Controls.Add(lblPrintSizeTag);
-            cardPrint.Controls.Add(cmbPrintSizeInput);
-            cardPrint.Controls.Add(chkAuto4W);
-            cardPrint.Controls.Add(lblOrderTypeTag);
-            cardPrint.Controls.Add(cmbOrderType);
-            cardPrint.Controls.Add(btnPrint);
-            this.Controls.Add(cardPrint);
+cardCanvas.Controls.Add(lblCanvasHeader);
+cardCanvas.Controls.Add(lblCanvasCabinTag);
+cardCanvas.Controls.Add(txtCanvasCabin);
+cardCanvas.Controls.Add(lblCanvasSizeTag);
+cardCanvas.Controls.Add(cmbCanvasSize);
+cardCanvas.Controls.Add(lblCanvasSellerTag);
+cardCanvas.Controls.Add(txtSeller);
+cardCanvas.Controls.Add(btnPostCanvas);
+this.Controls.Add(cardCanvas);
 
             // ========================================================================
             // RIGHT COLUMN — 4 STACKED iOS CARDS (Y=90 to Bottom=778)
