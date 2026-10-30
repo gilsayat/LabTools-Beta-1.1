@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>LabTools</AssemblyName>
+    <AssemblyName>LabTools V3.5</AssemblyName>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 
@@ -16,7 +16,7 @@
     <!-- ========================================== -->
     <Company>Gil Sayat</Company>
     <Authors>Gil Sayat</Authors>
-    <Product>LabTools</Product>
+    <Product>LabTools V3.5</Product>
     <Description>Laboratory Workflow Automation System</Description>
     <Copyright>Copyright © 2026 Gil Sayat</Copyright>
     
