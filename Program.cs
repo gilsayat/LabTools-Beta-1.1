@@ -972,7 +972,7 @@ namespace LabTools
             // ========================================================================
             // LEFT COLUMN — CARD 3: CANVAS ORDER STUDIO (Y=576, Height=96)
             // ========================================================================
-            cardCanvas = new RoundedCardPanel() { Location = new Point(14, 576), Size = new Size(586, 96), Title = "CANVAS ORDER STUDIO" };
+            cardCanvas = new RoundedCardPanel() { Location = new Point(14, 682), Size = new Size(586, 96), Title = "CANVAS POSTING" };
 
             lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };  
 
@@ -1006,7 +1006,7 @@ namespace LabTools
             // ========================================================================
             // LEFT COLUMN — CARD 4: PRINT DISPATCH (Y=682, Height=96 -> Bottom=778)
             // ========================================================================
-            cardPrint = new RoundedCardPanel() { Location = new Point(14, 682), Size = new Size(586, 96), Title = "PRINT DISPATCH" };
+            cardPrint = new RoundedCardPanel() { Location = new Point(14, 576), Size = new Size(586, 96), Title = "ORDER PRINTING" };
 
             lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
             txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(60, 32), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
@@ -1029,7 +1029,7 @@ namespace LabTools
             cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
             cmbOrderType.Text = "Package";  
   
-            btnPrint = new Button() { Text = "PRINT", Location = new Point(302, 60), Width = 270, Height = 29, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnPrint = new Button() { Text = "PRINT", Location = new Point(302, 60), Width = 270, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnPrint.FlatAppearance.BorderSize = 0;
             btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
 
@@ -1062,7 +1062,7 @@ namespace LabTools
             this.Controls.Add(cardMonitor);
 
             // R3: HUBAPP CANVAS ORDERS CARD (Y=420, Height=174)
-            cardHubCanvas = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "HUBAPP CANVAS ORDERS (0)" };
+            cardHubCanvas = new RoundedCardPanel() { Location = new Point(612, 604), Size = new Size(314, 174), Title = "HUBAPP CANVAS ORDERS (0)" };
             lblHubCanvasHeader = new Label() { Visible = false }; // Retained for safe reference
             lstHubCanvasOrders = new ListBox()
             {
@@ -1094,7 +1094,7 @@ namespace LabTools
             this.Controls.Add(cardHubCanvas);
 
             // R4: CABIN ORDERS CARD (Y=604, Height=174 -> Bottom=778)
-            cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 604), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
+            cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
             lblCabinOrdersHeader = new Label() { Visible = false }; // Retained for safe reference
             lstCabinOrders = new ListBox() { Location = new Point(12, 30), Width = 290, Height = 132, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
             lstCabinOrders.SelectedIndexChanged += (s, e) => {
