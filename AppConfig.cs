@@ -1,8 +1,8 @@
 using System;
 using System.IO;
-using System.Linq;
-using System.Collections.Generic;
 using System.Text.Json;
+using System.Collections.Generic;
+using Microsoft.Win32;
 
 namespace LabTools
 {
@@ -18,172 +18,205 @@ namespace LabTools
 
     public class AppConfig
     {
+        private static readonly string RegistryKeyPath = @"SOFTWARE\LabTools";
+        private static readonly string DefaultMasterFolder = @"Z:\PhotoLab\EHM\GIL";
+
+        // Per-PC Settings (Never overwritten by other PCs)
+        public bool HybridShip { get; set; } = false;
+        public string MasterSyncFolder { get; set; } = DefaultMasterFolder;
+
+        // Shared Lab Settings (Synced via Master File)
+        public string CurrentVoyage { get; set; } = "PO101126";
         public string PrintedFolder { get; set; } = @"Z:\Printed";
         public string OrdersFolder { get; set; } = @"Z:\PixelsOrder\Processed";
-        public string DownloadsFolder { get; set; } = @"C:\Downloads";
+        public string DownloadsFolder { get; set; } = @"Z:\PixelsOrder\Downloads";
+        public string ToPrintFolder { get; set; } = @"Z:\ToPrint";
         public string BorderedPrintsFolder { get; set; } = @"Z:\PixelsOrder\Prints";
         public string PrintshopFolder { get; set; } = @"Z:\PhotoLab\Printshop";
-        public string HubAppCanvasFolder { get; set; } = @"Z:\PixelsOrder\HubAppCanvas";
-        public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Misc";
+        public string HubAppCanvasFolder { get; set; } = @"Z:\PhotoLab\HubCanvas";
+        public string CopyrightFolder { get; set; } = @"Z:\PhotoLab\Copyright";
         public string CCFolder { get; set; } = @"Z:\CC";
-        public string DestinationForWhiteImages { get; set; } = @"Z:\WhiteImages";
-        public string ToPrintFolder { get; set; } = @"Z:\ToPrint";
-        public bool HybridShip { get; set; } = false;
-        public string MachineA { get; set; } = @"Z:\MachineA";
-        public string MachineB { get; set; } = @"Z:\MachineB";
-        public string MachineC { get; set; } = @"Z:\MachineC";
-        public string MachineD { get; set; } = @"Z:\MachineD";
-        public string CurrentVoyage { get; set; } = "PO101126";
-        public List<string> MediaSizes { get; set; } = new List<string>();
+        public string DestinationForWhiteImages { get; set; } = @"Z:\PhotoLab\Misc";
+        public string MachineA { get; set; } = @"Z:\PhotoLab\Misc\A";
+        public string MachineB { get; set; } = @"Z:\PhotoLab\Misc\B";
+        public string MachineC { get; set; } = @"Z:\PhotoLab\Misc\C";
+        public string MachineD { get; set; } = @"Z:\PhotoLab\Misc\D";
+
+        public List<string> MediaSizes { get; set; } = new List<string>(MainForm.DefaultMediaSizes);
         public List<MediaSizeRule> MediaSizeRules { get; set; } = new List<MediaSizeRule>();
 
-        private static readonly string ConfigFilePath = "config.json";
+        public MediaSizeRule GetEffectiveRule(string sizeName)
+        {
+            if (MediaSizeRules != null)
+            {
+                var match = MediaSizeRules.Find(r => r.Name.Equals(sizeName, StringComparison.OrdinalIgnoreCase));
+                if (match != null) return match;
+            }
+
+            bool isMulti = sizeName.IndexOf(" and ", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (isMulti)
+            {
+                var parts = RegexSplitSize(sizeName);
+                return new MediaSizeRule
+                {
+                    Name = sizeName,
+                    IsMultiBlock = true,
+                    Block1Size = parts.Item1,
+                    Block1PrintName = parts.Item1,
+                    Block2Size = parts.Item2,
+                    Block2PrintName = parts.Item2
+                };
+            }
+
+            return new MediaSizeRule
+            {
+                Name = sizeName,
+                IsMultiBlock = false,
+                Block1Size = sizeName,
+                Block1PrintName = sizeName,
+                Block2Size = "",
+                Block2PrintName = ""
+            };
+        }
+
+        private static (string, string) RegexSplitSize(string combined)
+        {
+            int idx = combined.IndexOf(" and ", StringComparison.OrdinalIgnoreCase);
+            if (idx >= 0)
+            {
+                return (combined.Substring(0, idx).Trim(), combined.Substring(idx + 5).Trim());
+            }
+            return (combined, "4-Wallets (vert)");
+        }
+
+        private static string GetMasterFilePath(string folder)
+        {
+            try
+            {
+                Directory.CreateDirectory(folder);
+                string path = Path.Combine(folder, "MasterSync.json");
+                if (File.Exists(path))
+                {
+                    File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden | FileAttributes.System);
+                }
+                return path;
+            }
+            catch
+            {
+                return "MasterSync.json";
+            }
+        }
+
+        public static string GetRegistryMasterFolder()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(RegistryKeyPath);
+                if (key != null)
+                {
+                    string? val = key.GetValue("MasterSyncFolder") as string;
+                    if (!string.IsNullOrWhiteSpace(val)) return val;
+                }
+            }
+            catch { }
+            return DefaultMasterFolder;
+        }
+
+        public static void SetRegistryMasterFolder(string folder)
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.CreateSubKey(RegistryKeyPath);
+                key?.SetValue("MasterSyncFolder", folder);
+            }
+            { }
+        }
 
         public static AppConfig Load()
         {
-            AppConfig config = new AppConfig();
+            string masterFolder = GetRegistryMasterFolder();
+            string path = GetMasterFilePath(masterFolder);
+            AppConfig config = new AppConfig { MasterSyncFolder = masterFolder };
+
             try
             {
-                if (File.Exists(ConfigFilePath))
+                if (File.Exists(path))
                 {
-                    string json = File.ReadAllText(ConfigFilePath);
+                    string json = Program.SafeReadAllText(path);
                     var loaded = JsonSerializer.Deserialize<AppConfig>(json);
                     if (loaded != null)
                     {
-                        config = loaded;
+                        config.CurrentVoyage = loaded.CurrentVoyage;
+                        config.PrintedFolder = loaded.PrintedFolder;
+                        config.OrdersFolder = loaded.OrdersFolder;
+                        config.DownloadsFolder = loaded.DownloadsFolder;
+                        config.ToPrintFolder = loaded.ToPrintFolder;
+                        config.BorderedPrintsFolder = loaded.BorderedPrintsFolder;
+                        config.PrintshopFolder = loaded.PrintshopFolder;
+                        config.HubAppCanvasFolder = loaded.HubAppCanvasFolder;
+                        config.CopyrightFolder = loaded.CopyrightFolder;
+                        config.CCFolder = loaded.CCFolder;
+                        config.DestinationForWhiteImages = loaded.DestinationForWhiteImages;
+                        config.MachineA = loaded.MachineA;
+                        config.MachineB = loaded.MachineB;
+                        config.MachineC = loaded.MachineC;
+                        config.MachineD = loaded.MachineD;
+                        if (loaded.MediaSizes != null && loaded.MediaSizes.Count > 0) config.MediaSizes = loaded.MediaSizes;
+                        if (loaded.MediaSizeRules != null) config.MediaSizeRules = loaded.MediaSizeRules;
                     }
                 }
-
-                // Clean up any legacy text files if they exist
-                if (File.Exists("HubAppCanvasFolder.txt")) { try { File.Delete("HubAppCanvasFolder.txt"); } catch { } }
-                if (File.Exists("MediaSizes.txt")) { try { File.Delete("MediaSizes.txt"); } catch { } }
             }
             catch { }
 
-            if (config.MediaSizes == null || config.MediaSizes.Count == 0)
+            // Load per-PC settings from local app data or registry if needed
+            try
             {
-                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+                using var key = Registry.CurrentUser.OpenSubKey(RegistryKeyPath + "\\" + Environment.MachineName);
+                if (key != null)
+                {
+                    if (key.GetValue("HybridShip") is int hs) config.HybridShip = (hs == 1);
+                }
             }
-
-            if (config.MediaSizeRules == null)
-            {
-                config.MediaSizeRules = new List<MediaSizeRule>();
-            }
+            catch { }
 
             return config;
         }
 
-        public MediaSizeRule GetEffectiveRule(string sizeName)
+        public void Save(bool syncSharedFolders = false)
         {
-            string cleanName = (sizeName ?? "").Trim();
-            if (MediaSizeRules != null)
-            {
-                var saved = MediaSizeRules.FirstOrDefault(r => r.Name.Equals(cleanName, StringComparison.OrdinalIgnoreCase));
-                if (saved != null && !string.IsNullOrWhiteSpace(saved.Block1Size))
-                {
-                    return new MediaSizeRule
-                    {
-                        Name = cleanName,
-                        IsMultiBlock = saved.IsMultiBlock,
-                        Block1Size = saved.Block1Size,
-                        Block1PrintName = string.IsNullOrWhiteSpace(saved.Block1PrintName) ? saved.Block1Size : saved.Block1PrintName,
-                        Block2Size = saved.Block2Size,
-                        Block2PrintName = string.IsNullOrWhiteSpace(saved.Block2PrintName) ? saved.Block2Size : saved.Block2PrintName
-                    };
-                }
-            }
+            SetRegistryMasterFolder(this.MasterSyncFolder);
+            string path = GetMasterFilePath(this.MasterSyncFolder);
 
-            return BuildDefaultRule(cleanName);
-        }
-
-        public static MediaSizeRule BuildDefaultRule(string sizeName)
-        {
-            string cleanName = (sizeName ?? "").Trim();
-
-            // Rule 1: If it contains "Combo", it is always 1 sheet (Single Block)
-            if (cleanName.IndexOf("combo", StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return new MediaSizeRule
-                {
-                    Name = cleanName,
-                    IsMultiBlock = false,
-                    Block1Size = cleanName,
-                    Block1PrintName = cleanName
-                };
-            }
-
-            // Rule 2: Specific preset for 8x10 and 4W on (10in)
-            if (cleanName.Equals("8x10 and 4W on (10in)", StringComparison.OrdinalIgnoreCase))
-            {
-                return new MediaSizeRule
-                {
-                    Name = cleanName,
-                    IsMultiBlock = true,
-                    Block1Size = "8x10",
-                    Block1PrintName = "8x10 Print",
-                    Block2Size = "4-Wallets (vert)",
-                    Block2PrintName = "4-Wallets (vert)"
-                };
-            }
-
-            // Rule 3: Generic "and" (without "Combo") splits into 2 blocks
-            int andIdx = cleanName.IndexOf(" and ", StringComparison.OrdinalIgnoreCase);
-            if (andIdx > 0)
-            {
-                string part1 = cleanName.Substring(0, andIdx).Trim();
-                string part2 = cleanName.Substring(andIdx + 5).Trim();
-
-                int onIdx = part2.IndexOf(" on ", StringComparison.OrdinalIgnoreCase);
-                if (onIdx > 0) part2 = part2.Substring(0, onIdx).Trim();
-
-                string b1Size = part1;
-                string b1Print = part1.Equals("8x10", StringComparison.OrdinalIgnoreCase) ? "8x10 Print" : part1;
-
-                string b2Size = (part2.Equals("4W", StringComparison.OrdinalIgnoreCase) || part2.StartsWith("4-Wallet", StringComparison.OrdinalIgnoreCase))
-                    ? "4-Wallets (vert)"
-                    : part2;
-                string b2Print = b2Size;
-
-                return new MediaSizeRule
-                {
-                    Name = cleanName,
-                    IsMultiBlock = true,
-                    Block1Size = b1Size,
-                    Block1PrintName = b1Print,
-                    Block2Size = b2Size,
-                    Block2PrintName = b2Print
-                };
-            }
-
-            // Rule 4: Preset for 4-2.5x3.5 Wallets (8x10)
-            if (cleanName.Equals("4-2.5x3.5 Wallets (8x10)", StringComparison.OrdinalIgnoreCase) ||
-                cleanName.Equals("4-2.5x3.5Wallets(8x10)", StringComparison.OrdinalIgnoreCase))
-            {
-                return new MediaSizeRule
-                {
-                    Name = cleanName,
-                    IsMultiBlock = false,
-                    Block1Size = "4-2.5x3.5Wallets(8x10)",
-                    Block1PrintName = "4-2.5x3.5 Wallets (8x10)"
-                };
-            }
-
-            // Default: Single block with identical Size and PrintName
-            return new MediaSizeRule
-            {
-                Name = cleanName,
-                IsMultiBlock = false,
-                Block1Size = cleanName,
-                Block1PrintName = cleanName
-            };
-        }
-
-        public void Save()
-        {
             try
             {
+                AppConfig dataToSave = this;
+                if (!syncSharedFolders && File.Exists(path))
+                {
+                    // Keep existing shared fields intact if we aren't pushing a sync
+                    string existingJson = Program.SafeReadAllText(path);
+                    var existing = JsonSerializer.Deserialize<AppConfig>(existingJson);
+                    if (existing != null)
+                    {
+                        this.CurrentVoyage = existing.CurrentVoyage;
+                        // Keep other shared paths unchanged unless sync is true
+                    }
+                }
+
                 string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(ConfigFilePath, json);
+                if (File.Exists(path))
+                {
+                    File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.Hidden & ~FileAttributes.System);
+                }
+                Program.SafeWriteAllText(path, json);
+                File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden | FileAttributes.System);
+            }
+            catch { }
+
+            // Save per-PC settings locally
+            try
+            {
+                using var key = Registry.CurrentUser.CreateSubKey(RegistryKeyPath + "\\" + Environment.MachineName);
+                key?.SetValue("HybridShip", this.HybridShip ? 1 : 0);
             }
             catch { }
         }
