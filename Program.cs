@@ -19,7 +19,7 @@ using System.Diagnostics;
 using System.Globalization;
   
 // ========================================================================  
-// LabTools v3.1 - Laboratory Workflow Automation System  
+// LabTools V3.5 - Laboratory Workflow Automation System  
 // Publisher: Gil Sayat (Stored in Application Metadata)  
 // ========================================================================  
   
@@ -66,10 +66,14 @@ namespace LabTools
             Application.SetCompatibleTextRenderingDefault(false);  
 
             // Run 1.5-Second Two-Stage Splash Screen first
-            using (var splash = new SplashForm())
+            try
             {
-                splash.ShowDialog();
+                using (var splash = new SplashForm())
+                {
+                    splash.ShowDialog();
+                }
             }
+            catch { }
 
             // Launch Main Application immediately after animation completes
             Application.Run(new MainForm());  
@@ -143,7 +147,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools v3.1";  
+        public const string AppTitle = "LabTools V3.5";  
   
         // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
@@ -155,18 +159,18 @@ namespace LabTools
         private static readonly Regex HtmlRowRegex = new Regex(@"<tr\b[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
         private static readonly Regex HtmlCellRegex = new Regex(@"<td\b[^>]*>(.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
   
-        // iOS Theme State & Palettes
+        // Soft Slate-Grey Dark Mode & Clean iOS Light Mode Palettes
         public static bool IsDarkMode { get; private set; } = true;
 
-        private Color darkBackground => IsDarkMode ? Color.FromArgb(18, 18, 20) : Color.FromArgb(242, 242, 247);  
-        private Color panelBackground => IsDarkMode ? Color.FromArgb(28, 28, 30) : Color.FromArgb(255, 255, 255);  
-        private Color secondaryBackground => IsDarkMode ? Color.FromArgb(44, 44, 46) : Color.FromArgb(229, 229, 234);
-        private Color cardBorderColor => IsDarkMode ? Color.FromArgb(56, 56, 58) : Color.FromArgb(209, 209, 214);
-        private Color accentBlue => Color.FromArgb(10, 132, 255);  
-        private Color accentTeal => Color.FromArgb(17, 138, 126);  
-        private Color textPrimary => IsDarkMode ? Color.White : Color.FromArgb(28, 28, 30);  
-        private Color textSecondary => IsDarkMode ? Color.FromArgb(152, 152, 157) : Color.FromArgb(110, 110, 115);
-        private Color textAccentHeader => IsDarkMode ? Color.FromArgb(100, 210, 255) : Color.FromArgb(0, 113, 164);
+        private Color darkBackground => IsDarkMode ? Color.FromArgb(38, 40, 44) : Color.FromArgb(240, 242, 246);  
+        private Color panelBackground => IsDarkMode ? Color.FromArgb(50, 52, 58) : Color.FromArgb(255, 255, 255);  
+        private Color secondaryBackground => IsDarkMode ? Color.FromArgb(62, 65, 72) : Color.FromArgb(232, 234, 240);
+        private Color cardBorderColor => IsDarkMode ? Color.FromArgb(82, 86, 94) : Color.FromArgb(206, 210, 218);
+        private Color accentBlue => Color.FromArgb(24, 132, 247);  
+        private Color accentTeal => Color.FromArgb(18, 142, 130);  
+        private Color textPrimary => IsDarkMode ? Color.FromArgb(245, 246, 248) : Color.FromArgb(28, 30, 34);  
+        private Color textSecondary => IsDarkMode ? Color.FromArgb(172, 176, 184) : Color.FromArgb(108, 112, 120);
+        private Color textAccentHeader => IsDarkMode ? Color.FromArgb(115, 218, 255) : Color.FromArgb(0, 112, 168);
   
         private readonly Color[] logoStripeColors = new Color[]  
         {  
@@ -201,16 +205,16 @@ namespace LabTools
         private Button btnHistory = null!;
         private Button btnSettings = null!;
 
-        // iOS Section Cards
+        // iOS Section Cards (3 Left Cards + 4 Right Cards)
         private RoundedCardPanel cardSearch = null!;
-        private RoundedCardPanel cardTransfer = null!;
-        private RoundedCardPanel cardCanvas = null!;
         private RoundedCardPanel cardPrint = null!;
+        private RoundedCardPanel cardTransferCanvas = null!;
         private RoundedCardPanel cardPreview = null!;
         private RoundedCardPanel cardMonitor = null!;
-        private RoundedCardPanel cardHubCanvas = null!;
         private RoundedCardPanel cardCabinOrders = null!;
+        private RoundedCardPanel cardHubCanvas = null!;
         private RoundedCardPanel badgeFilesCount = null!;
+        private Panel divTransferCanvas = null!;
         private Panel bottomStatusBar = null!;
 
         private TextBox txtSearch = null!;  
@@ -473,7 +477,7 @@ namespace LabTools
             StringBuilder html = new StringBuilder();
             html.AppendLine("<html xmlns:o=\"urn:schemas-microsoft-com:office:office\" xmlns:x=\"urn:schemas-microsoft-com:office:excel\" xmlns=\"http://www.w3.org/TR/REC-html40\">");
             html.AppendLine("<head><meta charset='utf-8'>");
-            html.AppendLine("<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Print History</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:ExcelWorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->");
+            html.AppendLine("<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Print History</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->");
             html.AppendLine("<style>");
             html.AppendLine("table { border-collapse: collapse; font-family: 'Segoe UI', Arial, sans-serif; font-size: 10pt; mso-table-lspace: 0pt; mso-table-rspace: 0pt; }");
             html.AppendLine("th { background-color: #1F4E78; color: #FFFFFF; font-weight: bold; border: 1px solid #000000; padding: 6px 12px; text-align: center; vertical-align: middle; white-space: nowrap; }");
@@ -514,7 +518,6 @@ namespace LabTools
             html.AppendLine("</table></body></html>");
             Program.SafeWriteAllText(xlsPath, html.ToString());
 
-            // Clean up redundant legacy duplicate files if they exist so only 1 file remains
             try
             {
                 string oldCsv = Path.Combine(ordersDir, voyageName + " Print History.csv");
@@ -583,7 +586,7 @@ namespace LabTools
             {
                 lblStatusRight.Text = config.HybridShip ? "● HybridShip ON" : "○ HybridShip OFF";
                 lblStatusRight.ForeColor = config.HybridShip
-                    ? (IsDarkMode ? Color.FromArgb(48, 209, 88) : Color.FromArgb(28, 158, 63))
+                    ? (IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(24, 150, 58))
                     : textSecondary;
             }
         }
@@ -687,7 +690,7 @@ namespace LabTools
                     if (latestDir != null)  
                     {  
                         lblLastOrder.Text = "Latest Order: Cabin " + latestDir.Name;  
-                        lblLastOrder.ForeColor = IsDarkMode ? Color.FromArgb(48, 209, 88) : Color.FromArgb(28, 148, 58);  
+                        lblLastOrder.ForeColor = IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(24, 150, 58);  
                     }  
                 }  
             }  
@@ -724,7 +727,7 @@ namespace LabTools
                 {  
                     using (Graphics g = Graphics.FromImage(bmp))  
                     {  
-                        g.Clear(Color.FromArgb(18, 19, 22));   
+                        g.Clear(Color.FromArgb(24, 25, 29));   
                         g.SmoothingMode = SmoothingMode.AntiAlias;  
                         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  
   
@@ -763,16 +766,16 @@ namespace LabTools
         }  
   
         // ========================================================================  
-        // MODERN iOS / iPadOS CARD-BASED COMPONENT INITIALIZER (ZERO DEAD SPACE)
+        // MODERN iOS / iPadOS 3-CARD LEFT & 4-CARD RIGHT LAYOUT (ZERO DEAD SPACE)
         // ========================================================================  
         private void InitializeCustomComponent()  
         {  
             this.Text = AppTitle;  
               
-            int titleBarOffset = 32;
-            this.Size = new Size(940, 818);  
-            this.MinimumSize = new Size(940, 818);  
-            this.MaximumSize = new Size(940, 818);  
+            int titleBarOffset = 34;
+            this.Size = new Size(940, 820);  
+            this.MinimumSize = new Size(940, 820);  
+            this.MaximumSize = new Size(940, 820);  
             this.FormBorderStyle = FormBorderStyle.None;  
             this.MaximizeBox = false;  
             this.StartPosition = FormStartPosition.CenterScreen;  
@@ -785,16 +788,28 @@ namespace LabTools
             this.DragDrop += HandleFileDragDrop;
 
             // ========================================================================
-            // 1. SLEEK WINDOW TITLE BAR
+            // 1. OUTER WINDOWS TITLE BAR (WITH CENTERED CURRENT CRUISE)
             // ========================================================================
             customWindowBar = new Panel() { Location = new Point(0, 0), Width = 940, Height = titleBarOffset };
             customWindowBar.MouseDown += DragForm_MouseDown;
 
-            PictureBox picWindowIcon = new PictureBox() { Location = new Point(12, 6), Size = new Size(20, 20), Image = smallTitleIconBmp, SizeMode = PictureBoxSizeMode.Zoom };
+            PictureBox picWindowIcon = new PictureBox() { Location = new Point(12, 7), Size = new Size(20, 20), Image = smallTitleIconBmp, SizeMode = PictureBoxSizeMode.Zoom };
             picWindowIcon.MouseDown += DragForm_MouseDown;
 
-            lblWindowTitleLeft = new Label() { Text = AppTitle, Location = new Point(38, 7), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Regular) };
+            lblWindowTitleLeft = new Label() { Text = AppTitle, Location = new Point(38, 8), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Regular) };
             lblWindowTitleLeft.MouseDown += DragForm_MouseDown;
+
+            // Prominent Centered Current Cruise Display in Top Window Title Bar
+            lblTitleBarCruise = new Label()
+            {
+                Text = GetNetworkVoyage().ToUpperInvariant(),
+                Location = new Point(270, 2),
+                Width = 400,
+                Height = 30,
+                Font = new Font("Segoe UI", 13.5f, FontStyle.Bold),
+                TextAlign = ContentAlignment.MiddleCenter
+            };
+            lblTitleBarCruise.MouseDown += DragForm_MouseDown;
 
             btnMinWin = new Button() { Text = "—", Location = new Point(802, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), TabStop = false };
             btnMinWin.FlatAppearance.BorderSize = 0;
@@ -810,21 +825,22 @@ namespace LabTools
 
             customWindowBar.Controls.Add(picWindowIcon);
             customWindowBar.Controls.Add(lblWindowTitleLeft);
+            customWindowBar.Controls.Add(lblTitleBarCruise);
             customWindowBar.Controls.Add(btnMinWin);
             customWindowBar.Controls.Add(btnMaxWin);
             customWindowBar.Controls.Add(btnCloseWin);
             this.Controls.Add(customWindowBar);
   
             // ========================================================================
-            // 2. iOS NAVIGATION HEADER BAR (TITLE + DARK/LIGHT SWITCH + VOYAGE + ACTIONS)
+            // 2. iOS NAVIGATION HEADER BAR (TITLE + DARK/LIGHT SWITCH + ACTIONS)
             // ========================================================================
-            topBar = new Panel() { Location = new Point(0, titleBarOffset), Width = 940, Height = 48 };  
+            topBar = new Panel() { Location = new Point(0, titleBarOffset), Width = 940, Height = 46 };  
             topBar.MouseDown += DragForm_MouseDown;
 
-            lblTitle = new Label() { Text = AppTitle, Location = new Point(16, 12), Font = new Font("Segoe UI", 12.5f, FontStyle.Bold), AutoSize = true };  
+            lblTitle = new Label() { Text = AppTitle, Location = new Point(16, 11), Font = new Font("Segoe UI", 12f, FontStyle.Bold), AutoSize = true };  
             lblTitle.MouseDown += DragForm_MouseDown;
 
-            themeSwitch = new ThemeToggleSwitch() { Location = new Point(138, 10), Size = new Size(92, 28), IsDark = IsDarkMode };
+            themeSwitch = new ThemeToggleSwitch() { Location = new Point(140, 9), Size = new Size(94, 28), IsDark = IsDarkMode };
             themeSwitch.Click += (s, e) =>
             {
                 IsDarkMode = !IsDarkMode;
@@ -832,36 +848,24 @@ namespace LabTools
                 ApplyTheme();
             };
 
-            lblTitleBarCruise = new Label()
-            {
-                Text = GetNetworkVoyage().ToUpperInvariant(),
-                Location = new Point(310, 8),
-                Width = 300,
-                Height = 32,
-                Font = new Font("Segoe UI", 14.5f, FontStyle.Bold),
-                TextAlign = ContentAlignment.MiddleCenter
-            };
-            lblTitleBarCruise.MouseDown += DragForm_MouseDown;
-
-            btnHistory = new Button() { Text = "Voyage Order History", Location = new Point(628, 9), Width = 162, Height = 30, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnHistory = new Button() { Text = "Voyage Order History", Location = new Point(622, 8), Width = 168, Height = 30, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnHistory.FlatAppearance.BorderSize = 1;
             btnHistory.Click += (s, e) => { OpenOrderHistoryDialog(); };  
 
-            btnSettings = new Button() { Text = "Settings", Location = new Point(798, 9), Width = 126, Height = 30, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnSettings = new Button() { Text = "Settings / Folders", Location = new Point(798, 8), Width = 128, Height = 30, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnSettings.FlatAppearance.BorderSize = 0;
             btnSettings.Click += (s, e) => { OpenSettingsDialog(); };  
               
             topBar.Controls.Add(lblTitle);  
             topBar.Controls.Add(themeSwitch);
-            topBar.Controls.Add(lblTitleBarCruise);
             topBar.Controls.Add(btnHistory);  
             topBar.Controls.Add(btnSettings);  
             this.Controls.Add(topBar);  
 
             // ========================================================================
-            // LEFT COLUMN — CARD 1: SEARCH & PHOTO QUEUE (Y=90, Height=368)
+            // LEFT COLUMN — CARD 1: SEARCH & PHOTO QUEUE (Y=90, Height=366)
             // ========================================================================
-            cardSearch = new RoundedCardPanel() { Location = new Point(14, 90), Size = new Size(586, 368), Title = "SEARCH & PHOTO QUEUE" };
+            cardSearch = new RoundedCardPanel() { Location = new Point(14, 90), Size = new Size(586, 366), Title = "SEARCH & PHOTO QUEUE" };
 
             txtSearch = new TextBox() { Text = "", Location = new Point(14, 34), Width = 296, Height = 28, Font = new Font("Segoe UI", 10.5f) };  
             SetPlaceholder(txtSearch, "Search Cabin, Order ID, or File...");
@@ -897,7 +901,7 @@ namespace LabTools
             btnCheckOrderIds.FlatAppearance.BorderSize = 0;
             btnCheckOrderIds.Click += (s, e) => { CheckOrderIdsForCabin(); };
   
-            lstFiles = new CheckedListBox() { Location = new Point(14, 110), Width = 418, Height = 236, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 9.5f), AllowDrop = true, CheckOnClick = false };  
+            lstFiles = new CheckedListBox() { Location = new Point(14, 110), Width = 418, Height = 234, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 9.5f), AllowDrop = true, CheckOnClick = false };  
             lstFiles.SelectedIndexChanged += (s, e) => { PreviewSelectedImageSafe(); };  
             lstFiles.DragEnter += HandleFileDragEnter;
             lstFiles.DragDrop += HandleFileDragDrop;
@@ -914,7 +918,7 @@ namespace LabTools
             lblFilesFound = new Label() { Text = "0\nFiles Found", Location = new Point(4, 12), Width = 122, Height = 58, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) };  
             badgeFilesCount.Controls.Add(lblFilesFound);
   
-            progressBar = new ProgressBar() { Location = new Point(14, 352), Width = 558, Height = 8, Style = ProgressBarStyle.Continuous, Visible = false };  
+            progressBar = new ProgressBar() { Location = new Point(14, 350), Width = 558, Height = 8, Style = ProgressBarStyle.Continuous, Visible = false };  
 
             cardSearch.Controls.Add(txtSearch);
             cardSearch.Controls.Add(btnFind);
@@ -931,127 +935,132 @@ namespace LabTools
             this.Controls.Add(cardSearch);
 
             // ========================================================================
-            // LEFT COLUMN — CARD 2: MACHINE & USB / DOWNLOADS (Y=468, Height=98)
+            // LEFT COLUMN — CARD 2: PRINT DISPATCH (MOVED UP! Y=466, Height=148)
+            // Features Full-Height Big PRINT Button (210x102) on the Right
             // ========================================================================
-            cardTransfer = new RoundedCardPanel() { Location = new Point(14, 468), Size = new Size(586, 98), Title = "MACHINE & USB / DOWNLOADS" };
+            cardPrint = new RoundedCardPanel() { Location = new Point(14, 466), Size = new Size(586, 148), Title = "PRINT DISPATCH" };
 
             lblMachine = new Label() { Text = "Machine:", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            cmbMachine = new ComboBox() { Location = new Point(78, 31), Width = 135, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
+            cmbMachine = new ComboBox() { Location = new Point(78, 31), Width = 140, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
             cmbMachine.Items.AddRange(new string[] { "Machine A", "Machine B", "Machine C", "Machine D" });  
             cmbMachine.SelectedIndex = 2;  
             cmbMachine.SelectedIndexChanged += (s, e) => { CheckMachineHealthAsync(); };  
   
-            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(220, 34), AutoSize = true, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold) };  
-  
-            lblUsb = new Label() { Text = "USB:", Location = new Point(14, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            txtUsbDrive = new TextBox() { Text = "D", Location = new Point(52, 62), Width = 55, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
+            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(226, 34), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
 
-            lblUsbCabin = new Label() { Text = "Cabin:", Location = new Point(120, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            txtCabin = new TextBox() { Text = "", Location = new Point(168, 62), Width = 110, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
+            lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(62, 62), Width = 86, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            SetPlaceholder(txtPrintCabinNum, "cabin");  
+  
+            lblPrintQty = new Label() { Text = "Qty:", Location = new Point(158, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            numPrintQty = new NumericUpDown() { Location = new Point(192, 62), Width = 52, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+
+            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(258, 63), Width = 88, Height = 24, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+  
+            lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(14, 95), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+            cmbPrintSizeInput = new ComboBox() { Location = new Point(62, 92), Width = 286, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
+  
+            lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(14, 122), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Visible = false };
+            cmbOrderType = new ComboBox() { Location = new Point(62, 118), Width = 286, Height = 24, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 8.75f) };  
+            cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
+            cmbOrderType.Text = "Package";  
+            lblOrderTypeTag.Location = new Point(14, 121);
+            lblOrderTypeTag.Visible = true;
+  
+            // MASSIVE FULL-CARD-HEIGHT PRINT BUTTON ON THE RIGHT
+            btnPrint = new Button() { Text = "PRINT", Location = new Point(362, 31), Width = 210, Height = 106, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnPrint.FlatAppearance.BorderSize = 0;
+            btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
+
+            cardPrint.Controls.Add(lblMachine);
+            cardPrint.Controls.Add(cmbMachine);
+            cardPrint.Controls.Add(lblMachineStatus);
+            cardPrint.Controls.Add(lblPrintCabinLabel);
+            cardPrint.Controls.Add(txtPrintCabinNum);
+            cardPrint.Controls.Add(lblPrintQty);
+            cardPrint.Controls.Add(numPrintQty);
+            cardPrint.Controls.Add(chkAuto4W);
+            cardPrint.Controls.Add(lblPrintSizeTag);
+            cardPrint.Controls.Add(cmbPrintSizeInput);
+            cardPrint.Controls.Add(lblOrderTypeTag);
+            cardPrint.Controls.Add(cmbOrderType);
+            cardPrint.Controls.Add(btnPrint);
+            this.Controls.Add(cardPrint);
+
+            // ========================================================================
+            // LEFT COLUMN — CARD 3: USB TRANSFER & CANVAS ORDER (MOVED DOWN! Y=624, Height=154)
+            // Compact Uniform Buttons for Copy To USB, Copy To DL, and Post Canvas
+            // ========================================================================
+            cardTransferCanvas = new RoundedCardPanel() { Location = new Point(14, 624), Size = new Size(586, 154), Title = "USB TRANSFER & CANVAS ORDER STUDIO" };
+
+            // Top Half: USB & Downloads Transfer
+            lblUsb = new Label() { Text = "USB:", Location = new Point(14, 36), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            txtUsbDrive = new TextBox() { Text = "D", Location = new Point(52, 33), Width = 54, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
+
+            lblUsbCabin = new Label() { Text = "Cabin:", Location = new Point(118, 36), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            txtCabin = new TextBox() { Text = "", Location = new Point(166, 33), Width = 110, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
             SetPlaceholder(txtCabin, "cabin");  
   
-            btnCopyUsb = new Button() { Text = "Copy To USB", Location = new Point(296, 32), Width = 134, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.25f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnCopyUsb = new Button() { Text = "Copy To USB", Location = new Point(292, 30), Width = 136, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnCopyUsb.FlatAppearance.BorderSize = 0;
             btnCopyUsb.Click += (s, e) => { CopyCheckedFilesToUsb(); };  
   
-            btnCopyDownloads = new Button() { Text = "Copy To DL", Location = new Point(438, 32), Width = 134, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.25f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnCopyDownloads = new Button() { Text = "Copy To DL", Location = new Point(436, 30), Width = 136, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnCopyDownloads.FlatAppearance.BorderSize = 0;
             btnCopyDownloads.Click += (s, e) => { CopyToDownloadsFolder(); };  
 
-            cardTransfer.Controls.Add(lblMachine);
-            cardTransfer.Controls.Add(cmbMachine);
-            cardTransfer.Controls.Add(lblMachineStatus);
-            cardTransfer.Controls.Add(lblUsb);
-            cardTransfer.Controls.Add(txtUsbDrive);
-            cardTransfer.Controls.Add(lblUsbCabin);
-            cardTransfer.Controls.Add(txtCabin);
-            cardTransfer.Controls.Add(btnCopyUsb);
-            cardTransfer.Controls.Add(btnCopyDownloads);
-            this.Controls.Add(cardTransfer);
+            // Subtle Horizontal Divider Line inside Card 3
+            divTransferCanvas = new Panel() { Location = new Point(14, 72), Size = new Size(558, 1) };
 
-            // ========================================================================
-// LEFT COLUMN — PRINT DISPATCH CARD (Now at the top, Y=576)
-// ========================================================================
-cardPrint = new RoundedCardPanel() { Location = new Point(14, 576), Size = new Size(586, 96), Title = "PRINT DISPATCH" };
+            // Bottom Half: Canvas Order Studio
+            lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 83), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
 
-lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
-txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(60, 32), Width = 80, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-SetPlaceholder(txtPrintCabinNum, "cabin");  
+            lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(188, 84), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+            txtCanvasCabin = new TextBox() { Text = "", Location = new Point(236, 81), Width = 112, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
+            SetPlaceholder(txtCanvasCabin, "cabin");  
 
-lblPrintQty = new Label() { Text = "Qty:", Location = new Point(148, 35), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
-numPrintQty = new NumericUpDown() { Location = new Point(180, 32), Width = 48, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            lblCanvasSizeTag = new Label() { Text = "Size:", Location = new Point(14, 116), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+            cmbCanvasSize = new ComboBox() { Location = new Point(52, 113), Width = 122, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
+            cmbCanvasSize.Items.AddRange(new string[] { "16x20", "20x30", "11x14", "8x10" });  
+            cmbCanvasSize.SelectedIndex = 0;  
 
-lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(14, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-cmbPrintSizeInput = new ComboBox() { Location = new Point(52, 61), Width = 238, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
-
-txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
-txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
-txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
-
-chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(16, 63), Width = 82, Height = 24, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
+            lblCanvasSellerTag = new Label() { Text = "Seller:", Location = new Point(188, 116), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
+            txtSeller = new TextBox() { Text = "", Location = new Point(236, 113), Width = 112, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            SetPlaceholder(txtSeller, "seller");  
   
-lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(102, 65), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-cmbOrderType = new ComboBox() { Location = new Point(142, 62), Width = 148, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
-cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
-cmbOrderType.Text = "Package";  
+            // Post Canvas Button matched cleanly to the compact utility style
+            btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(362, 81), Width = 210, Height = 58, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnPostCanvas.FlatAppearance.BorderSize = 0;
+            btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
 
-// PRINT button matched to Post Canvas height (Height = 54)
-btnPrint = new Button() { Text = "PRINT", Location = new Point(302, 32), Width = 270, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 11f, FontStyle.Bold), Cursor = Cursors.Hand };  
-btnPrint.FlatAppearance.BorderSize = 0;
-btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
+            // Synchronize Cabin Numbers across all 3 inputs
+            txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
+            txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
+            txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
 
-cardPrint.Controls.Add(lblPrintCabinLabel);
-cardPrint.Controls.Add(txtPrintCabinNum);
-cardPrint.Controls.Add(lblPrintQty);
-cardPrint.Controls.Add(numPrintQty);
-cardPrint.Controls.Add(lblPrintSizeTag);
-cardPrint.Controls.Add(cmbPrintSizeInput);
-cardPrint.Controls.Add(chkAuto4W);
-cardPrint.Controls.Add(lblOrderTypeTag);
-cardPrint.Controls.Add(cmbOrderType);
-cardPrint.Controls.Add(btnPrint);
-this.Controls.Add(cardPrint);
-
-            // ========================================================================
-// LEFT COLUMN — CANVAS ORDER STUDIO CARD (Now at the bottom, Y=682)
-// ========================================================================
-cardCanvas = new RoundedCardPanel() { Location = new Point(14, 682), Size = new Size(586, 96), Title = "CANVAS ORDER STUDIO" };
-
-lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 10f, FontStyle.Bold) };  
-
-lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(185, 36), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-txtCanvasCabin = new TextBox() { Text = "", Location = new Point(232, 33), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
-SetPlaceholder(txtCanvasCabin, "cabin");  
-
-lblCanvasSizeTag = new Label() { Text = "Size:", Location = new Point(14, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-cmbCanvasSize = new ComboBox() { Location = new Point(52, 61), Width = 122, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
-cmbCanvasSize.Items.AddRange(new string[] { "16x20", "20x30", "11x14", "8x10" });  
-cmbCanvasSize.SelectedIndex = 0;  
-
-lblCanvasSellerTag = new Label() { Text = "Seller:", Location = new Point(185, 64), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
-txtSeller = new TextBox() { Text = "", Location = new Point(232, 61), Width = 128, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-SetPlaceholder(txtSeller, "seller");  
-
-btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(372, 32), Width = 200, Height = 54, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 10f, FontStyle.Bold), Cursor = Cursors.Hand };  
-btnPostCanvas.FlatAppearance.BorderSize = 0;
-btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
-
-cardCanvas.Controls.Add(lblCanvasHeader);
-cardCanvas.Controls.Add(lblCanvasCabinTag);
-cardCanvas.Controls.Add(txtCanvasCabin);
-cardCanvas.Controls.Add(lblCanvasSizeTag);
-cardCanvas.Controls.Add(cmbCanvasSize);
-cardCanvas.Controls.Add(lblCanvasSellerTag);
-cardCanvas.Controls.Add(txtSeller);
-cardCanvas.Controls.Add(btnPostCanvas);
-this.Controls.Add(cardCanvas);
+            cardTransferCanvas.Controls.Add(lblUsb);
+            cardTransferCanvas.Controls.Add(txtUsbDrive);
+            cardTransferCanvas.Controls.Add(lblUsbCabin);
+            cardTransferCanvas.Controls.Add(txtCabin);
+            cardTransferCanvas.Controls.Add(btnCopyUsb);
+            cardTransferCanvas.Controls.Add(btnCopyDownloads);
+            cardTransferCanvas.Controls.Add(divTransferCanvas);
+            cardTransferCanvas.Controls.Add(lblCanvasHeader);
+            cardTransferCanvas.Controls.Add(lblCanvasCabinTag);
+            cardTransferCanvas.Controls.Add(txtCanvasCabin);
+            cardTransferCanvas.Controls.Add(lblCanvasSizeTag);
+            cardTransferCanvas.Controls.Add(cmbCanvasSize);
+            cardTransferCanvas.Controls.Add(lblCanvasSellerTag);
+            cardTransferCanvas.Controls.Add(txtSeller);
+            cardTransferCanvas.Controls.Add(btnPostCanvas);
+            this.Controls.Add(cardTransferCanvas);
 
             // ========================================================================
-            // RIGHT COLUMN — 4 STACKED iOS CARDS (Y=90 to Bottom=778)
+            // RIGHT COLUMN — 4 STACKED iOS CARDS (CABIN ORDERS UP, HUBAPP CANVAS DOWN)
             // ========================================================================
             // R1: LIVE PREVIEW CARD (Y=90, Height=238)
             cardPreview = new RoundedCardPanel() { Location = new Point(612, 90), Size = new Size(314, 238), Title = "LIVE PREVIEW" };
-            picLogo = new PictureBox() { Location = new Point(17, 28), Width = 280, Height = 198, BackColor = Color.FromArgb(18, 19, 22), SizeMode = PictureBoxSizeMode.Zoom };  
+            picLogo = new PictureBox() { Location = new Point(17, 28), Width = 280, Height = 198, BackColor = Color.FromArgb(24, 25, 29), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
             cardPreview.Controls.Add(picLogo);
             this.Controls.Add(cardPreview);
@@ -1062,9 +1071,34 @@ this.Controls.Add(cardCanvas);
             cardMonitor.Controls.Add(lblLastOrder);
             this.Controls.Add(cardMonitor);
 
-            // R3: HUBAPP CANVAS ORDERS CARD (Y=420, Height=174)
+            // R3: CABIN ORDERS CARD (MOVED UP! Y=420, Height=174)
+            cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
+            lblCabinOrdersHeader = new Label() { Visible = false };
+            lstCabinOrders = new ListBox() { Location = new Point(12, 30), Width = 290, Height = 132, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
+            lstCabinOrders.SelectedIndexChanged += (s, e) => {
+                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
+                {
+                    SetStatus($"Selected Order {order.OrderId} ({order.FilePaths.Count} photos) - Double-click to view & select photos.");
+                }
+            };
+            lstCabinOrders.DoubleClick += (s, e) => {
+                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
+                {
+                    using (var viewer = new OrderPhotoViewerForm(order, config.PrintedFolder))
+                    {
+                        if (viewer.ShowDialog(this) == DialogResult.OK && viewer.SelectedPhotoPaths.Count > 0)
+                        {
+                            ImportPhotosFromOrder(order, viewer.SelectedPhotoPaths);
+                        }
+                    }
+                }
+            };
+            cardCabinOrders.Controls.Add(lstCabinOrders);
+            this.Controls.Add(cardCabinOrders);
+
+            // R4: HUBAPP CANVAS ORDERS CARD (MOVED DOWN! Y=604, Height=174 -> Bottom=778)
             cardHubCanvas = new RoundedCardPanel() { Location = new Point(612, 604), Size = new Size(314, 174), Title = "HUBAPP CANVAS ORDERS (0)" };
-            lblHubCanvasHeader = new Label() { Visible = false }; // Retained for safe reference
+            lblHubCanvasHeader = new Label() { Visible = false };
             lstHubCanvasOrders = new ListBox()
             {
                 Location = new Point(12, 30),
@@ -1094,53 +1128,29 @@ this.Controls.Add(cardCanvas);
             cardHubCanvas.Controls.Add(lstHubCanvasOrders);
             this.Controls.Add(cardHubCanvas);
 
-            // R4: CABIN ORDERS CARD (Y=604, Height=174 -> Bottom=778)
-            cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
-            lblCabinOrdersHeader = new Label() { Visible = false }; // Retained for safe reference
-            lstCabinOrders = new ListBox() { Location = new Point(12, 30), Width = 290, Height = 132, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
-            lstCabinOrders.SelectedIndexChanged += (s, e) => {
-                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
-                {
-                    SetStatus($"Selected Order {order.OrderId} ({order.FilePaths.Count} photos) - Double-click to view & select photos.");
-                }
-            };
-            lstCabinOrders.DoubleClick += (s, e) => {
-                if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
-                {
-                    using (var viewer = new OrderPhotoViewerForm(order, config.PrintedFolder))
-                    {
-                        if (viewer.ShowDialog(this) == DialogResult.OK && viewer.SelectedPhotoPaths.Count > 0)
-                        {
-                            ImportPhotosFromOrder(order, viewer.SelectedPhotoPaths);
-                        }
-                    }
-                }
-            };
-            cardCabinOrders.Controls.Add(lstCabinOrders);
-            this.Controls.Add(cardCabinOrders);
-
             // ========================================================================
-            // 3. UNIFIED BOTTOM STATUS BAR (Y=786, Height=32)
+            // 3. UNIFIED BOTTOM STATUS BAR (Y=786, Height=34)
             // ========================================================================
-            bottomStatusBar = new Panel() { Location = new Point(0, 786), Width = 940, Height = 32 };
-            lblStatusLeft = new Label() { Text = "● Ready", Location = new Point(16, 5), Width = 720, Height = 22, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
-            lblStatusRight = new Label() { Text = "● HybridShip OFF", Location = new Point(745, 5), Width = 180, Height = 22, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            bottomStatusBar = new Panel() { Location = new Point(0, 786), Width = 940, Height = 34 };
+            lblStatusLeft = new Label() { Text = "● Ready", Location = new Point(16, 6), Width = 720, Height = 22, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
+            lblStatusRight = new Label() { Text = "○ HybridShip OFF", Location = new Point(745, 6), Width = 180, Height = 22, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
             bottomStatusBar.Controls.Add(lblStatusLeft);
             bottomStatusBar.Controls.Add(lblStatusRight);
             this.Controls.Add(bottomStatusBar);
         }  
 
         // ========================================================================  
-        // DYNAMIC iOS DARK / LIGHT THEME ENGINE
+        // DYNAMIC SLATE-GREY DARK / LIGHT THEME ENGINE
         // ========================================================================  
         public void ApplyTheme()
         {
             this.BackColor = darkBackground;
 
             // Window Bar & Top Bar
-            Color winBarBg = IsDarkMode ? Color.FromArgb(12, 12, 14) : Color.FromArgb(228, 228, 234);
+            Color winBarBg = IsDarkMode ? Color.FromArgb(28, 30, 34) : Color.FromArgb(224, 226, 232);
             customWindowBar.BackColor = winBarBg;
             lblWindowTitleLeft.ForeColor = textSecondary;
+            lblTitleBarCruise.ForeColor = textPrimary;
             btnMinWin.BackColor = winBarBg;
             btnMinWin.ForeColor = textPrimary;
             btnMaxWin.BackColor = winBarBg;
@@ -1148,10 +1158,9 @@ this.Controls.Add(cardCanvas);
             btnCloseWin.BackColor = winBarBg;
             btnCloseWin.ForeColor = textPrimary;
 
-            Color navBarBg = IsDarkMode ? Color.FromArgb(22, 22, 25) : Color.FromArgb(248, 248, 252);
+            Color navBarBg = IsDarkMode ? Color.FromArgb(33, 35, 39) : Color.FromArgb(248, 249, 252);
             topBar.BackColor = navBarBg;
             lblTitle.ForeColor = textPrimary;
-            lblTitleBarCruise.ForeColor = textPrimary;
 
             btnHistory.BackColor = secondaryBackground;
             btnHistory.ForeColor = textPrimary;
@@ -1161,13 +1170,15 @@ this.Controls.Add(cardCanvas);
             btnSettings.ForeColor = Color.White;
 
             // Cards
-            foreach (var card in new[] { cardSearch, cardTransfer, cardCanvas, cardPrint, cardPreview, cardMonitor, cardHubCanvas, cardCabinOrders })
+            foreach (var card in new[] { cardSearch, cardPrint, cardTransferCanvas, cardPreview, cardMonitor, cardCabinOrders, cardHubCanvas })
             {
                 card.CardColor = panelBackground;
                 card.BorderColor = cardBorderColor;
                 card.HeaderColor = textAccentHeader;
                 card.Invalidate();
             }
+
+            divTransferCanvas.BackColor = cardBorderColor;
 
             badgeFilesCount.CardColor = secondaryBackground;
             badgeFilesCount.BorderColor = cardBorderColor;
@@ -1212,7 +1223,7 @@ this.Controls.Add(cardCanvas);
             chkAuto4W.ForeColor = textPrimary;
 
             lblCanvasHeader.BackColor = panelBackground;
-            lblCanvasHeader.ForeColor = IsDarkMode ? Color.FromArgb(90, 220, 210) : Color.FromArgb(12, 122, 110);
+            lblCanvasHeader.ForeColor = IsDarkMode ? Color.FromArgb(105, 228, 218) : Color.FromArgb(12, 122, 110);
 
             lblLastOrder.BackColor = panelBackground;
             if (lblLastOrder.Text.StartsWith("Waiting"))
@@ -1252,9 +1263,9 @@ this.Controls.Add(cardCanvas);
 
         public static void ApplyDialogTheme(Form dialog)
         {
-            Color bg = IsDarkMode ? Color.FromArgb(24, 24, 27) : Color.FromArgb(242, 242, 247);
-            Color secBg = IsDarkMode ? Color.FromArgb(44, 44, 46) : Color.FromArgb(255, 255, 255);
-            Color fg = IsDarkMode ? Color.White : Color.FromArgb(28, 28, 30);
+            Color bg = IsDarkMode ? Color.FromArgb(38, 40, 44) : Color.FromArgb(240, 242, 246);
+            Color secBg = IsDarkMode ? Color.FromArgb(56, 59, 66) : Color.FromArgb(255, 255, 255);
+            Color fg = IsDarkMode ? Color.FromArgb(245, 246, 248) : Color.FromArgb(28, 30, 34);
 
             dialog.BackColor = bg;
             foreach (Control c in dialog.Controls)
@@ -1427,7 +1438,7 @@ this.Controls.Add(cardCanvas);
                     Bitmap thumb = new Bitmap(40, 30);
                     using (Graphics g = Graphics.FromImage(thumb))
                     {
-                        g.Clear(Color.FromArgb(18, 19, 22));
+                        g.Clear(Color.FromArgb(24, 25, 29));
                         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                         double r = Math.Min(40.0 / img.Width, 30.0 / img.Height);
                         int w = Math.Max(1, (int)(img.Width * r));
@@ -2901,7 +2912,7 @@ this.Controls.Add(cardCanvas);
                     Bitmap thumb = new Bitmap(280, 198);
                     using (Graphics g = Graphics.FromImage(thumb))
                     {
-                        g.Clear(Color.FromArgb(18, 19, 22));
+                        g.Clear(Color.FromArgb(24, 25, 29));
                         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                         g.SmoothingMode = SmoothingMode.HighQuality;
@@ -2931,7 +2942,7 @@ this.Controls.Add(cardCanvas);
             Bitmap logoBmp = new Bitmap(280, 198);  
             using (Graphics g = Graphics.FromImage(logoBmp))  
             {  
-                g.Clear(Color.FromArgb(18, 19, 22));  
+                g.Clear(Color.FromArgb(24, 25, 29));  
                 g.SmoothingMode = SmoothingMode.AntiAlias;  
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  
   
@@ -3005,7 +3016,7 @@ this.Controls.Add(cardCanvas);
         private void HighlightNewOrder(string folderName)  
         {  
             lblLastOrder.Text = "Order Received: Cabin " + folderName;  
-            lblLastOrder.ForeColor = IsDarkMode ? Color.FromArgb(48, 209, 88) : Color.FromArgb(28, 148, 58);  
+            lblLastOrder.ForeColor = IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(24, 150, 58);  
   
             flashCounter = 0;  
             if (flashTimer == null)  
@@ -3013,7 +3024,7 @@ this.Controls.Add(cardCanvas);
                 flashTimer = new System.Windows.Forms.Timer() { Interval = 800 };   
                 flashTimer.Tick += (s, e) => {  
                     flashCounter++;  
-                    Color alertGreen = IsDarkMode ? Color.FromArgb(48, 209, 88) : Color.FromArgb(28, 148, 58);
+                    Color alertGreen = IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(24, 150, 58);
                     lblLastOrder.ForeColor = (flashCounter % 2 == 0) ? alertGreen : textPrimary;  
                     if (flashCounter >= 12) { lblLastOrder.ForeColor = alertGreen; flashTimer.Stop(); }  
                 };  
@@ -3032,12 +3043,12 @@ this.Controls.Add(cardCanvas);
             else if (selected == "Machine D") path = config.MachineD;  
   
             lblMachineStatus.Text = "● Checking...";  
-            lblMachineStatus.ForeColor = Color.FromArgb(215, 160, 0);  
+            lblMachineStatus.ForeColor = Color.FromArgb(225, 170, 0);  
   
             bool isOnline = await Task.Run(() => { try { return !string.IsNullOrWhiteSpace(path) && Directory.Exists(path); } catch { return false; } });  
   
-            if (isOnline) { lblMachineStatus.Text = "● Online"; lblMachineStatus.ForeColor = IsDarkMode ? Color.FromArgb(48, 209, 88) : Color.FromArgb(28, 158, 63); }  
-            else { lblMachineStatus.Text = "● Offline"; lblMachineStatus.ForeColor = Color.FromArgb(235, 68, 68); }  
+            if (isOnline) { lblMachineStatus.Text = "● Online (Ready)"; lblMachineStatus.ForeColor = IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(24, 150, 58); }  
+            else { lblMachineStatus.Text = "● Offline"; lblMachineStatus.ForeColor = Color.FromArgb(240, 82, 82); }  
         }  
   
         private void UpdateNextCanvasNumber()  
@@ -3729,9 +3740,9 @@ this.Controls.Add(cardCanvas);
     public class RoundedCardPanel : Panel
     {
         public string Title { get; set; } = "";
-        public Color CardColor { get; set; } = Color.FromArgb(28, 28, 30);
-        public Color BorderColor { get; set; } = Color.FromArgb(56, 56, 58);
-        public Color HeaderColor { get; set; } = Color.FromArgb(100, 210, 255);
+        public Color CardColor { get; set; } = Color.FromArgb(50, 52, 58);
+        public Color BorderColor { get; set; } = Color.FromArgb(82, 86, 94);
+        public Color HeaderColor { get; set; } = Color.FromArgb(115, 218, 255);
         public int CornerRadius { get; set; } = 12;
 
         public RoundedCardPanel()
@@ -3795,7 +3806,7 @@ this.Controls.Add(cardCanvas);
         public ThemeToggleSwitch()
         {
             this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            this.Size = new Size(92, 28);
+            this.Size = new Size(94, 28);
             this.Cursor = Cursors.Hand;
         }
 
@@ -3814,9 +3825,9 @@ this.Controls.Add(cardCanvas);
             int h = this.Height - 2;
             Rectangle rect = new Rectangle(1, 1, w, h);
 
-            Color pillColor = isDark ? Color.FromArgb(44, 44, 48) : Color.FromArgb(222, 222, 228);
-            Color borderColor = isDark ? Color.FromArgb(72, 72, 78) : Color.FromArgb(195, 195, 202);
-            Color textColor = isDark ? Color.White : Color.FromArgb(28, 28, 30);
+            Color pillColor = isDark ? Color.FromArgb(56, 59, 66) : Color.FromArgb(222, 224, 230);
+            Color borderColor = isDark ? Color.FromArgb(88, 92, 102) : Color.FromArgb(195, 198, 206);
+            Color textColor = isDark ? Color.White : Color.FromArgb(28, 30, 34);
 
             using (GraphicsPath path = new GraphicsPath())
             {
@@ -3836,7 +3847,7 @@ this.Controls.Add(cardCanvas);
             int knobX = isDark ? (rect.X + pad) : (rect.Right - knobSize - pad);
             int knobY = rect.Y + pad;
 
-            Color knobColor = isDark ? Color.FromArgb(10, 132, 255) : Color.FromArgb(255, 179, 0);
+            Color knobColor = isDark ? Color.FromArgb(24, 132, 247) : Color.FromArgb(255, 179, 0);
             using (Brush knobBrush = new SolidBrush(knobColor))
             {
                 e.Graphics.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
@@ -4057,7 +4068,7 @@ this.Controls.Add(cardCanvas);
                 Text = $"{order.FilePaths.Count} of {order.FilePaths.Count} selected",
                 Location = new Point(260, 381),
                 AutoSize = true,
-                ForeColor = Color.FromArgb(48, 209, 88),
+                ForeColor = Color.FromArgb(68, 220, 108),
                 Font = new Font("Segoe UI", 9f, FontStyle.Bold)
             };
 
@@ -4075,7 +4086,7 @@ this.Controls.Add(cardCanvas);
                 Location = new Point(420, 70),
                 Width = 260,
                 Height = 195,
-                BackColor = Color.FromArgb(20, 20, 20),
+                BackColor = Color.FromArgb(24, 25, 29),
                 BorderStyle = BorderStyle.FixedSingle,
                 SizeMode = PictureBoxSizeMode.Zoom
             };
@@ -4096,7 +4107,7 @@ this.Controls.Add(cardCanvas);
                 Location = new Point(240, 425),
                 Width = 270,
                 Height = 40,
-                BackColor = Color.FromArgb(17, 138, 126),
+                BackColor = Color.FromArgb(18, 142, 130),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10f, FontStyle.Bold)
@@ -4183,7 +4194,7 @@ this.Controls.Add(cardCanvas);
                             Bitmap bmp = new Bitmap(picThumb.Width, picThumb.Height);
                             using (Graphics g = Graphics.FromImage(bmp))
                             {
-                                g.Clear(Color.FromArgb(20, 20, 20));
+                                g.Clear(Color.FromArgb(24, 25, 29));
                                 g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                                 g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                                 g.SmoothingMode = SmoothingMode.HighQuality;
@@ -4350,7 +4361,7 @@ this.Controls.Add(cardCanvas);
                 Text = "Block 1 ->",
                 Location = new Point(20, 325),
                 Width = 75,
-                ForeColor = Color.FromArgb(48, 209, 88),
+                ForeColor = Color.FromArgb(68, 220, 108),
                 Font = new Font("Segoe UI", 9, FontStyle.Bold)
             };
             Label lblBlock1Size = new Label()
@@ -4389,7 +4400,7 @@ this.Controls.Add(cardCanvas);
                 Text = "Block 2 ->",
                 Location = new Point(20, 362),
                 Width = 75,
-                ForeColor = Color.FromArgb(48, 209, 88),
+                ForeColor = Color.FromArgb(68, 220, 108),
                 Font = new Font("Segoe UI", 9, FontStyle.Bold)
             };
             lblBlock2Size = new Label()
@@ -4438,7 +4449,7 @@ this.Controls.Add(cardCanvas);
                 Location = new Point(20, 435),
                 Width = 155,
                 Height = 38,
-                BackColor = Color.FromArgb(17, 138, 126),
+                BackColor = Color.FromArgb(18, 142, 130),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9, FontStyle.Bold)
@@ -4477,7 +4488,7 @@ this.Controls.Add(cardCanvas);
                 Location = new Point(470, 435),
                 Width = 115,
                 Height = 38,
-                BackColor = Color.FromArgb(10, 132, 255),
+                BackColor = Color.FromArgb(24, 132, 247),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 9, FontStyle.Bold)
@@ -4699,7 +4710,7 @@ this.Controls.Add(cardCanvas);
   
             chkDual = new CheckBox() { Text = "This is a 2-Photo Split Border (like Mini Porthole)", Location = new Point(20, 295), Width = 350, ForeColor = Color.White };  
   
-            Button btnAdd = new Button() { Text = "Add / Update Template", Location = new Point(20, 330), Width = 170, Height = 35, BackColor = Color.FromArgb(17, 138, 126), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            Button btnAdd = new Button() { Text = "Add / Update Template", Location = new Point(20, 330), Width = 170, Height = 35, BackColor = Color.FromArgb(18, 142, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
             btnAdd.Click += BtnAdd_Click;  
   
             Button btnRemove = new Button() { Text = "Remove Selected", Location = new Point(200, 330), Width = 140, Height = 35, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
@@ -4825,7 +4836,7 @@ this.Controls.Add(cardCanvas);
   
             Label lblInst = new Label() { Text = isDualPhoto ? "Click a side to select. Scroll Wheel to Zoom. Drag to Move." : "Scroll Mouse Wheel to Zoom. Click and Drag to Move.", ForeColor = Color.White, Location = new Point(20, 15), AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
               
-            Button btnApply = new Button() { Text = "Apply && Print", Location = new Point(620, 10), Width = 140, Height = 35, BackColor = Color.FromArgb(17, 138, 126), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
+            Button btnApply = new Button() { Text = "Apply && Print", Location = new Point(620, 10), Width = 140, Height = 35, BackColor = Color.FromArgb(18, 142, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
             btnApply.Click += BtnApply_Click;  
   
             Button btnCancel = new Button() { Text = "Cancel", Location = new Point(770, 10), Width = 90, Height = 35, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
