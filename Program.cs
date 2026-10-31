@@ -18,11 +18,6 @@ using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Globalization;
   
-// ========================================================================  
-// LabTools V3.5 - Laboratory Workflow Automation System  
-// Publisher: Gil Sayat (Stored in Application Metadata)  
-// ========================================================================  
-  
 namespace LabTools  
 {  
     static class Program  
@@ -40,7 +35,6 @@ namespace LabTools
         [STAThread]  
         static void Main()  
         {  
-            // Enforce single-instance execution policy via Windows Mutex
             bool createdNew;
             singleInstanceMutex = new Mutex(true, "LabTools_Beta_SingleInstance_Mutex_GilSayat", out createdNew);
             if (!createdNew)
@@ -65,7 +59,6 @@ namespace LabTools
             Application.EnableVisualStyles();  
             Application.SetCompatibleTextRenderingDefault(false);  
 
-            // Run 1.5-Second Two-Stage Splash Screen first
             try
             {
                 using (var splash = new SplashForm())
@@ -75,15 +68,11 @@ namespace LabTools
             }
             catch { }
 
-            // Launch Main Application immediately after animation completes
             Application.Run(new MainForm());  
 
             GC.KeepAlive(singleInstanceMutex);
         }  
   
-        // ========================================================================  
-        // MULTI-PC TRAFFIC CONTROLLERS (FILE LOCK SAFETY)  
-        // ========================================================================  
         public static void SafeAppendAllText(string path, string content)
         {
             const int maxAttempts = 15;
@@ -147,9 +136,8 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools V3.5";  
+        public const string AppTitle = "LabTools v3.1";  
   
-        // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
         private static readonly Regex CabinSearchRegex = new Regex(@"^\d{4,5}$", RegexOptions.Compiled);  
         private static readonly Regex PhotoRegex = new Regex(@"\b([pP]\d{6,12}(?:\.[jJ][pP][eE]?[gG])?|[A-Za-z0-9_\-\.]+\.(?:jpe?g|png|tif|bmp))\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);  
@@ -159,7 +147,6 @@ namespace LabTools
         private static readonly Regex HtmlRowRegex = new Regex(@"<tr\b[^>]*>(.*?)</tr>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
         private static readonly Regex HtmlCellRegex = new Regex(@"<td\b[^>]*>(.*?)</td>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
   
-        // Soft Slate-Grey Dark Mode & Clean iOS Light Mode Palettes
         public static bool IsDarkMode { get; private set; } = true;
 
         private Color darkBackground => IsDarkMode ? Color.FromArgb(38, 40, 44) : Color.FromArgb(240, 242, 246);  
@@ -205,7 +192,7 @@ namespace LabTools
         private Button btnHistory = null!;
         private Button btnSettings = null!;
 
-        // iOS Section Cards (3 Left Cards + 4 Right Cards)
+        // iOS Section Cards
         private RoundedCardPanel cardSearch = null!;
         private RoundedCardPanel cardPrint = null!;
         private RoundedCardPanel cardTransferCanvas = null!;
@@ -271,6 +258,7 @@ namespace LabTools
         private FileSystemWatcher? folderWatcher;  
         private FileSystemWatcher? printshopWatcher;  
         private FileSystemWatcher? hubCanvasWatcher;
+        private FileSystemWatcher? masterSyncWatcher;
         private System.Windows.Forms.Timer? flashTimer;  
         private int flashCounter = 0;  
         private bool isSyncingCabin = false;  
@@ -314,9 +302,6 @@ namespace LabTools
             }
         }
   
-        // ========================================================================  
-        // UNIFIED SINGLE-FILE HISTORY ENGINE (BORDERED EXCEL .XLS + LEGACY FALLBACK)
-        // ========================================================================  
         public class HistoryRecord
         {
             public string Timestamp { get; set; } = "";
@@ -532,12 +517,9 @@ namespace LabTools
             catch { }
         }
   
-        // ========================================================================  
-        // NETWORK VOYAGE SYNC ENGINE & CRUISE DATE CUTOFF PARSER (12:00 PM NOON)
-        // ========================================================================  
         private string GetNetworkVoyage()  
         {  
-            string networkFile = @"Z:\PhotoLab\EHM\GIL\ActiveVoyage.txt";  
+            string networkFile = Path.Combine(config.MasterSyncFolder, "ActiveVoyage.txt");  
             try  
             {  
                 if (File.Exists(networkFile))  
@@ -553,15 +535,15 @@ namespace LabTools
         private void SetNetworkVoyage(string voyage)  
         {  
             string cleanVoyage = voyage.Trim().ToUpperInvariant();
-            string networkFile = @"Z:\PhotoLab\EHM\GIL\ActiveVoyage.txt";  
+            string networkFile = Path.Combine(config.MasterSyncFolder, "ActiveVoyage.txt");  
             try  
             {  
-                Directory.CreateDirectory(@"Z:\PhotoLab\EHM\GIL");  
+                Directory.CreateDirectory(config.MasterSyncFolder);  
                 if (File.Exists(networkFile)) {  
-                    File.SetAttributes(networkFile, File.GetAttributes(networkFile) & ~FileAttributes.Hidden);  
+                    File.SetAttributes(networkFile, File.GetAttributes(networkFile) & ~FileAttributes.Hidden & ~FileAttributes.System);  
                 }  
                 Program.SafeWriteAllText(networkFile, cleanVoyage);  
-                File.SetAttributes(networkFile, File.GetAttributes(networkFile) | FileAttributes.Hidden);  
+                File.SetAttributes(networkFile, File.GetAttributes(networkFile) | FileAttributes.Hidden | FileAttributes.System);  
             }  
             catch { }  
             config.CurrentVoyage = cleanVoyage;  
@@ -633,11 +615,64 @@ namespace LabTools
             SetupFolderWatcher();  
             SetupPrintshopWatcher();  
             SetupHubCanvasWatcher();
+            SetupMasterSyncWatcher();
             RefreshHubCanvasOrdersList();
             UpdateNextCanvasNumber();  
             CheckMachineHealthAsync();  
             CheckLatestDownloadOrder();  
         }  
+
+        private void SetupMasterSyncWatcher()
+        {
+            try
+            {
+                masterSyncWatcher?.Dispose();
+                if (!string.IsNullOrWhiteSpace(config.MasterSyncFolder) && Directory.Exists(config.MasterSyncFolder))
+                {
+                    masterSyncWatcher = new FileSystemWatcher(config.MasterSyncFolder, "MasterSync.json")
+                    {
+                        NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName
+                    };
+                    masterSyncWatcher.Changed += (s, e) =>
+                    {
+                        if (!IsDisposed && IsHandleCreated)
+                        {
+                            try
+                            {
+                                BeginInvoke(new Action(() =>
+                                {
+                                    var latest = AppConfig.Load();
+                                    config.CurrentVoyage = latest.CurrentVoyage;
+                                    config.PrintedFolder = latest.PrintedFolder;
+                                    config.OrdersFolder = latest.OrdersFolder;
+                                    config.DownloadsFolder = latest.DownloadsFolder;
+                                    config.ToPrintFolder = latest.ToPrintFolder;
+                                    config.BorderedPrintsFolder = latest.BorderedPrintsFolder;
+                                    config.PrintshopFolder = latest.PrintshopFolder;
+                                    config.HubAppCanvasFolder = latest.HubAppCanvasFolder;
+                                    config.CopyrightFolder = latest.CopyrightFolder;
+                                    config.CCFolder = latest.CCFolder;
+                                    config.DestinationForWhiteImages = latest.DestinationForWhiteImages;
+                                    config.MachineA = latest.MachineA;
+                                    config.MachineB = latest.MachineB;
+                                    config.MachineC = latest.MachineC;
+                                    config.MachineD = latest.MachineD;
+                                    config.MediaSizes = latest.MediaSizes;
+                                    config.MediaSizeRules = latest.MediaSizeRules;
+
+                                    UpdateTitleBarCruiseDisplay();
+                                    LoadMediaSizes();
+                                    SetStatus("Master configuration live-synced across network.");
+                                }));
+                            }
+                            catch { }
+                        }
+                    };
+                    masterSyncWatcher.EnableRaisingEvents = true;
+                }
+            }
+            catch { }
+        }
 
         public void LoadMediaSizes()
         {
@@ -765,9 +800,6 @@ namespace LabTools
             this.Icon = appIcon;  
         }  
   
-        // ========================================================================  
-        // MODERN iOS / iPadOS 3-CARD LEFT & 4-CARD RIGHT LAYOUT (ZERO DEAD SPACE)
-        // ========================================================================  
         private void InitializeCustomComponent()  
         {  
             this.Text = AppTitle;  
@@ -787,9 +819,6 @@ namespace LabTools
             this.DragEnter += HandleFileDragEnter;
             this.DragDrop += HandleFileDragDrop;
 
-            // ========================================================================
-            // 1. OUTER WINDOWS TITLE BAR (WITH CENTERED CURRENT CRUISE)
-            // ========================================================================
             customWindowBar = new Panel() { Location = new Point(0, 0), Width = 940, Height = titleBarOffset };
             customWindowBar.MouseDown += DragForm_MouseDown;
 
@@ -799,7 +828,6 @@ namespace LabTools
             lblWindowTitleLeft = new Label() { Text = AppTitle, Location = new Point(38, 8), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Regular) };
             lblWindowTitleLeft.MouseDown += DragForm_MouseDown;
 
-            // Prominent Centered Current Cruise Display in Top Window Title Bar
             lblTitleBarCruise = new Label()
             {
                 Text = GetNetworkVoyage().ToUpperInvariant(),
@@ -811,14 +839,14 @@ namespace LabTools
             };
             lblTitleBarCruise.MouseDown += DragForm_MouseDown;
 
-            btnMinWin = new Button() { Text = "—", Location = new Point(802, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), TabStop = false };
+            Button btnMinWin = new Button() { Text = "—", Location = new Point(802, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), TabStop = false };
             btnMinWin.FlatAppearance.BorderSize = 0;
             btnMinWin.Click += (s, e) => { this.WindowState = FormWindowState.Minimized; };
 
-            btnMaxWin = new Button() { Text = "☐", Location = new Point(848, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), Enabled = false, TabStop = false };
+            Button btnMaxWin = new Button() { Text = "☐", Location = new Point(848, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), Enabled = false, TabStop = false };
             btnMaxWin.FlatAppearance.BorderSize = 0;
 
-            btnCloseWin = new Button() { Text = "✕", Location = new Point(894, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f), TabStop = false };
+            Button btnCloseWin = new Button() { Text = "✕", Location = new Point(894, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f), TabStop = false };
             btnCloseWin.FlatAppearance.BorderSize = 0;
             btnCloseWin.FlatAppearance.MouseOverBackColor = Color.FromArgb(232, 17, 35);
             btnCloseWin.Click += (s, e) => { this.Close(); };
@@ -831,9 +859,6 @@ namespace LabTools
             customWindowBar.Controls.Add(btnCloseWin);
             this.Controls.Add(customWindowBar);
   
-            // ========================================================================
-            // 2. iOS NAVIGATION HEADER BAR (TITLE + DARK/LIGHT SWITCH + ACTIONS)
-            // ========================================================================
             topBar = new Panel() { Location = new Point(0, titleBarOffset), Width = 940, Height = 46 };  
             topBar.MouseDown += DragForm_MouseDown;
 
@@ -862,9 +887,7 @@ namespace LabTools
             topBar.Controls.Add(btnSettings);  
             this.Controls.Add(topBar);  
 
-            // ========================================================================
-            // LEFT COLUMN — CARD 1: SEARCH & PHOTO QUEUE (Y=90, Height=366)
-            // ========================================================================
+            // Card 1: Search & Photo Queue
             cardSearch = new RoundedCardPanel() { Location = new Point(14, 90), Size = new Size(586, 366), Title = "SEARCH & PHOTO QUEUE" };
 
             txtSearch = new TextBox() { Text = "", Location = new Point(14, 34), Width = 296, Height = 28, Font = new Font("Segoe UI", 10.5f) };  
@@ -934,10 +957,7 @@ namespace LabTools
             cardSearch.Controls.Add(progressBar);
             this.Controls.Add(cardSearch);
 
-            // ========================================================================
-            // LEFT COLUMN — CARD 2: PRINT DISPATCH (MOVED UP! Y=466, Height=148)
-            // Features Full-Height Big PRINT Button (210x102) on the Right
-            // ========================================================================
+            // Card 2: Print Dispatch (Moved Up with Massive Print Button)
             cardPrint = new RoundedCardPanel() { Location = new Point(14, 466), Size = new Size(586, 148), Title = "PRINT DISPATCH" };
 
             lblMachine = new Label() { Text = "Machine:", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
@@ -967,7 +987,6 @@ namespace LabTools
             lblOrderTypeTag.Location = new Point(14, 121);
             lblOrderTypeTag.Visible = true;
   
-            // MASSIVE FULL-CARD-HEIGHT PRINT BUTTON ON THE RIGHT
             btnPrint = new Button() { Text = "PRINT", Location = new Point(362, 31), Width = 210, Height = 106, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnPrint.FlatAppearance.BorderSize = 0;
             btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
@@ -987,13 +1006,9 @@ namespace LabTools
             cardPrint.Controls.Add(btnPrint);
             this.Controls.Add(cardPrint);
 
-            // ========================================================================
-            // LEFT COLUMN — CARD 3: USB TRANSFER & CANVAS ORDER (MOVED DOWN! Y=624, Height=154)
-            // Compact Uniform Buttons for Copy To USB, Copy To DL, and Post Canvas
-            // ========================================================================
+            // Card 3: USB Transfer & Canvas Order Studio (Moved Down)
             cardTransferCanvas = new RoundedCardPanel() { Location = new Point(14, 624), Size = new Size(586, 154), Title = "USB TRANSFER & CANVAS ORDER STUDIO" };
 
-            // Top Half: USB & Downloads Transfer
             lblUsb = new Label() { Text = "USB:", Location = new Point(14, 36), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
             txtUsbDrive = new TextBox() { Text = "D", Location = new Point(52, 33), Width = 54, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
 
@@ -1009,10 +1024,8 @@ namespace LabTools
             btnCopyDownloads.FlatAppearance.BorderSize = 0;
             btnCopyDownloads.Click += (s, e) => { CopyToDownloadsFolder(); };  
 
-            // Subtle Horizontal Divider Line inside Card 3
             divTransferCanvas = new Panel() { Location = new Point(14, 72), Size = new Size(558, 1) };
 
-            // Bottom Half: Canvas Order Studio
             lblCanvasHeader = new Label() { Text = "Next Canvas No. 001", Location = new Point(14, 83), AutoSize = true, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
 
             lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(188, 84), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
@@ -1028,12 +1041,10 @@ namespace LabTools
             txtSeller = new TextBox() { Text = "", Location = new Point(236, 113), Width = 112, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
             SetPlaceholder(txtSeller, "seller");  
   
-            // Post Canvas Button matched cleanly to the compact utility style
             btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(362, 81), Width = 210, Height = 58, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnPostCanvas.FlatAppearance.BorderSize = 0;
             btnPostCanvas.Click += async (s, e) => { await PostCanvasOrderAsync(); };  
 
-            // Synchronize Cabin Numbers across all 3 inputs
             txtCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCanvasCabin.Text = txtCabin.Text; txtPrintCabinNum.Text = txtCabin.Text; isSyncingCabin = false; };  
             txtCanvasCabin.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtCanvasCabin.Text; txtPrintCabinNum.Text = txtCanvasCabin.Text; isSyncingCabin = false; };  
             txtPrintCabinNum.TextChanged += (s, e) => { if (isSyncingCabin) return; isSyncingCabin = true; txtCabin.Text = txtPrintCabinNum.Text; txtCanvasCabin.Text = txtPrintCabinNum.Text; isSyncingCabin = false; };  
@@ -1055,23 +1066,19 @@ namespace LabTools
             cardTransferCanvas.Controls.Add(btnPostCanvas);
             this.Controls.Add(cardTransferCanvas);
 
-            // ========================================================================
-            // RIGHT COLUMN — 4 STACKED iOS CARDS (CABIN ORDERS UP, HUBAPP CANVAS DOWN)
-            // ========================================================================
-            // R1: LIVE PREVIEW CARD (Y=90, Height=238)
+            // Right Column Cards
             cardPreview = new RoundedCardPanel() { Location = new Point(612, 90), Size = new Size(314, 238), Title = "LIVE PREVIEW" };
             picLogo = new PictureBox() { Location = new Point(17, 28), Width = 280, Height = 198, BackColor = Color.FromArgb(24, 25, 29), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
             cardPreview.Controls.Add(picLogo);
             this.Controls.Add(cardPreview);
 
-            // R2: DIGITAL ORDER MONITOR CARD (Y=338, Height=72)
             cardMonitor = new RoundedCardPanel() { Location = new Point(612, 338), Size = new Size(314, 72), Title = "DIGITAL ORDER MONITOR" };
             lblLastOrder = new Label() { Text = "Waiting for orders...", Location = new Point(12, 28), Width = 290, Height = 34, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) };  
             cardMonitor.Controls.Add(lblLastOrder);
             this.Controls.Add(cardMonitor);
 
-            // R3: CABIN ORDERS CARD (MOVED UP! Y=420, Height=174)
+            // Cabin Orders (Swapped UP)
             cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
             lblCabinOrdersHeader = new Label() { Visible = false };
             lstCabinOrders = new ListBox() { Location = new Point(12, 30), Width = 290, Height = 132, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
@@ -1096,7 +1103,7 @@ namespace LabTools
             cardCabinOrders.Controls.Add(lstCabinOrders);
             this.Controls.Add(cardCabinOrders);
 
-            // R4: HUBAPP CANVAS ORDERS CARD (MOVED DOWN! Y=604, Height=174 -> Bottom=778)
+            // HubApp Canvas Orders (Swapped DOWN)
             cardHubCanvas = new RoundedCardPanel() { Location = new Point(612, 604), Size = new Size(314, 174), Title = "HUBAPP CANVAS ORDERS (0)" };
             lblHubCanvasHeader = new Label() { Visible = false };
             lstHubCanvasOrders = new ListBox()
@@ -1128,9 +1135,6 @@ namespace LabTools
             cardHubCanvas.Controls.Add(lstHubCanvasOrders);
             this.Controls.Add(cardHubCanvas);
 
-            // ========================================================================
-            // 3. UNIFIED BOTTOM STATUS BAR (Y=786, Height=34)
-            // ========================================================================
             bottomStatusBar = new Panel() { Location = new Point(0, 786), Width = 940, Height = 34 };
             lblStatusLeft = new Label() { Text = "● Ready", Location = new Point(16, 6), Width = 720, Height = 22, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
             lblStatusRight = new Label() { Text = "○ HybridShip OFF", Location = new Point(745, 6), Width = 180, Height = 22, TextAlign = ContentAlignment.MiddleRight, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
@@ -1139,14 +1143,10 @@ namespace LabTools
             this.Controls.Add(bottomStatusBar);
         }  
 
-        // ========================================================================  
-        // DYNAMIC SLATE-GREY DARK / LIGHT THEME ENGINE
-        // ========================================================================  
         public void ApplyTheme()
         {
             this.BackColor = darkBackground;
 
-            // Window Bar & Top Bar
             Color winBarBg = IsDarkMode ? Color.FromArgb(28, 30, 34) : Color.FromArgb(224, 226, 232);
             customWindowBar.BackColor = winBarBg;
             lblWindowTitleLeft.ForeColor = textSecondary;
@@ -1169,7 +1169,6 @@ namespace LabTools
             btnSettings.BackColor = accentTeal;
             btnSettings.ForeColor = Color.White;
 
-            // Cards
             foreach (var card in new[] { cardSearch, cardPrint, cardTransferCanvas, cardPreview, cardMonitor, cardCabinOrders, cardHubCanvas })
             {
                 card.CardColor = panelBackground;
@@ -1186,7 +1185,6 @@ namespace LabTools
             lblFilesFound.BackColor = secondaryBackground;
             lblFilesFound.ForeColor = textPrimary;
 
-            // Inputs & Lists
             foreach (var tb in new[] { txtSearch, txtUsbDrive, txtCabin, txtCanvasCabin, txtSeller, txtPrintCabinNum })
             {
                 tb.BackColor = secondaryBackground;
@@ -1212,7 +1210,6 @@ namespace LabTools
             lstCabinOrders.BackColor = secondaryBackground;
             lstCabinOrders.ForeColor = textPrimary;
 
-            // Labels
             foreach (var lbl in new[] { lblMachine, lblUsb, lblUsbCabin, lblCanvasCabinTag, lblCanvasSizeTag, lblCanvasSellerTag, lblPrintCabinLabel, lblPrintQty, lblPrintSizeTag, lblOrderTypeTag })
             {
                 lbl.BackColor = panelBackground;
@@ -1229,7 +1226,6 @@ namespace LabTools
             if (lblLastOrder.Text.StartsWith("Waiting"))
                 lblLastOrder.ForeColor = textSecondary;
 
-            // Buttons
             btnFind.BackColor = accentBlue;
             btnFind.ForeColor = Color.White;
             btnCancelSearch.BackColor = Color.FromArgb(215, 58, 73);
@@ -1253,7 +1249,6 @@ namespace LabTools
                 actionBtn.ForeColor = Color.White;
             }
 
-            // Bottom Status Bar
             bottomStatusBar.BackColor = navBarBg;
             lblStatusLeft.ForeColor = textPrimary;
             UpdateHybridShipBadgeDisplay();
@@ -1304,9 +1299,6 @@ namespace LabTools
             }
         }
 
-        // ========================================================================
-        // HUBAPP CANVAS ORDER MONITOR, THUMBNAIL RENDERER & AUTO-POSTER
-        // ========================================================================
         private void SetupHubCanvasWatcher()
         {
             try
@@ -1621,9 +1613,6 @@ namespace LabTools
             }
         }
 
-        // ========================================================================
-        // CHECK ORDER IDS (RECURSIVE SCAN + UNIFIED HISTORY FILE)
-        // ========================================================================
         private async void CheckOrderIdsForCabin()
         {
             string targetCabin = txtSearch.Text.Trim();
@@ -2037,9 +2026,6 @@ namespace LabTools
             }  
         }  
   
-        // ========================================================================  
-        // ASYNC SEARCH ENGINE (CANCELLABLE + EXACT-MATCH FAST PATH)  
-        // ========================================================================  
         private async void SearchFilesAsync(string query)  
         {  
             int thisSearch = Interlocked.Increment(ref searchGeneration);
@@ -2615,9 +2601,6 @@ namespace LabTools
             }  
         }  
 
-        // ========================================================================  
-        // SMART PRINT TICKET BLOCK BUILDER ("Combo" vs "and" + Custom Rules)
-        // ========================================================================  
         private void AppendPrintBlocksForItem(StringBuilder sb, string sizeName, int qty, string mediaType, string filePath, bool appendAuto4W, bool isFlattenedBorder)
         {
             if (isFlattenedBorder)
@@ -2670,9 +2653,6 @@ namespace LabTools
             }
         }
 
-        // ========================================================================  
-        // HYBRIDSHIP AUTO-COPY TO "TO PRINT FOLDER" BY CABIN (NO DUPLICATES PER CABIN)
-        // ========================================================================  
         private void AutoCopyPrintedPhotosForHybridShip(string cabinNum, IEnumerable<string> filePaths)
         {
             if (!config.HybridShip) return;
@@ -2700,9 +2680,6 @@ namespace LabTools
             catch { }
         }
   
-        // ========================================================================  
-        // PRINT DISPATCH  
-        // ========================================================================  
         private void ExecutePrintJobAsync()  
         {  
             try  
@@ -2850,9 +2827,6 @@ namespace LabTools
             }  
         }  
   
-        // ========================================================================  
-        // LIVE NETWORK ORDER ID SCANNER (Reads Unified .xls + Legacy .csv)  
-        // ========================================================================  
         private string GetNext7CharOrderId()
         {
             int maxId = 6000000;
@@ -2884,9 +2858,6 @@ namespace LabTools
             return nextNum.ToString("D7");
         }
 
-        // ========================================================================  
-        // PREVIEW  
-        // ========================================================================  
         private void PreviewSelectedImageSafe()  
         {  
             if (lstFiles.SelectedItem is FileItem item && File.Exists(item.FullPath))  
@@ -3313,7 +3284,7 @@ namespace LabTools
         }  
   
         // ========================================================================  
-        // SETTINGS DIALOG (WITH "HYBRIDSHIP" CAPSULE TOGGLE & "TO PRINT FOLDER")
+        // SETTINGS DIALOG (WITH SYNC BUTTON + TOOLTIP & HYBRIDSHIP TOGGLE)
         // ========================================================================  
         private void OpenSettingsDialog()  
         {  
@@ -3327,6 +3298,49 @@ namespace LabTools
                 MaximizeBox = false, MinimizeBox = false,  
                 Icon = appIcon  
             };  
+
+            Button btnSync = new Button()
+            {
+                Text = "Sync",
+                Location = new Point(20, 12),
+                Width = 70,
+                Height = 30,
+                BackColor = secondaryBackground,
+                ForeColor = textPrimary,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+            };
+            btnSync.FlatAppearance.BorderColor = cardBorderColor;
+
+            Label lblSyncInfo = new Label()
+            {
+                Text = "ⓘ",
+                Location = new Point(95, 15),
+                AutoSize = true,
+                ForeColor = textAccentHeader,
+                Font = new Font("Segoe UI", 10.5f, FontStyle.Bold),
+                Cursor = Cursors.Help
+            };
+
+            ToolTip tip = new ToolTip();
+            tip.SetToolTip(lblSyncInfo, "Sync all folder paths across all PCs");
+            tip.SetToolTip(btnSync, "Sync all folder paths across all PCs");
+
+            btnSync.Click += (s, e) =>
+            {
+                DialogResult dr = MessageBox.Show(
+                    settingsForm,
+                    "Are you sure you want to sync all folder paths to all other PCs (excluding Master Sync Folder)?",
+                    "Confirm Folder Sync",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question);
+
+                if (dr == DialogResult.Yes)
+                {
+                    config.Save(syncSharedFolders: true);
+                    MessageBox.Show(settingsForm, "All folder paths successfully synced across the network!", "Sync Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            };
 
             Label lblHybridShip = new Label()
             {
@@ -3383,10 +3397,13 @@ namespace LabTools
                 }
             };
 
+            settingsForm.Controls.Add(btnSync);
+            settingsForm.Controls.Add(lblSyncInfo);
             settingsForm.Controls.Add(lblHybridShip);
             settingsForm.Controls.Add(toggleHybridShip);
   
             int y = 55;  
+            AddSettingRow(settingsForm, "Master Sync Folder:", config.MasterSyncFolder, ref y, (val) => config.MasterSyncFolder = val);
             AddSettingRow(settingsForm, "Printed Folder:", config.PrintedFolder, ref y, (val) => config.PrintedFolder = val);  
             AddSettingRow(settingsForm, "Orders Folder:", config.OrdersFolder, ref y, (val) => config.OrdersFolder = val);  
             AddSettingRow(settingsForm, "Downloads Folder:", config.DownloadsFolder, ref y, (val) => config.DownloadsFolder = val);  
@@ -3424,18 +3441,19 @@ namespace LabTools
             Button btnSave = new Button() { Text = "Save Settings", Location = new Point(420, y + 10), Width = 215, Height = 36, BackColor = accentTeal, ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };  
             btnSave.Click += (s, e) =>  
             {  
-                config.Save();
+                config.Save(syncSharedFolders: false);
                 LoadMediaSizes();
                 LoadCustomTemplates();
                 SetupFolderWatcher();
                 SetupPrintshopWatcher();
                 SetupHubCanvasWatcher();
+                SetupMasterSyncWatcher();
                 RefreshHubCanvasOrdersList();
                 UpdateNextCanvasNumber();
                 CheckMachineHealthAsync();
                 CheckLatestDownloadOrder();  
                 UpdateHybridShipBadgeDisplay();
-                MessageBox.Show("Settings and HotFolder paths saved successfully!", "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);  
+                MessageBox.Show("Settings saved locally successfully!", "Settings Saved", MessageBoxButtons.OK, MessageBoxIcon.Information);  
                 settingsForm.Close();  
             };  
               
@@ -3458,9 +3476,6 @@ namespace LabTools
             parent.Controls.Add(lbl); parent.Controls.Add(txt); parent.Controls.Add(btnBrowse); yPos += 33;  
         }  
   
-        // ========================================================================  
-        // ORDER AUDIT HISTORY (UNIFIED 1-FILE BORDERED EXCEL GENERATOR)  
-        // ========================================================================  
         private void LogOrderToAuditHistory(string orderId, string cabin, string machine, string size, int count, string type, List<string> fileNames)  
         {  
             try  
@@ -3713,6 +3728,7 @@ namespace LabTools
             folderWatcher?.Dispose();
             printshopWatcher?.Dispose();
             hubCanvasWatcher?.Dispose();
+            masterSyncWatcher?.Dispose();
             flashTimer?.Dispose();
             picLogo?.Image?.Dispose();
             foreach (var bmp in hubThumbCache.Values) bmp?.Dispose();
@@ -3734,9 +3750,6 @@ namespace LabTools
         }
     }  
 
-    // ========================================================================  
-    // MODERN iOS ROUNDED CARD PANEL CONTROL
-    // ========================================================================  
     public class RoundedCardPanel : Panel
     {
         public string Title { get; set; } = "";
@@ -3791,9 +3804,6 @@ namespace LabTools
         }
     }
 
-    // ========================================================================  
-    // MODERN iOS DARK / LIGHT CAPSULE SWITCH CONTROL
-    // ========================================================================  
     public class ThemeToggleSwitch : Control
     {
         private bool isDark = true;
@@ -3872,9 +3882,6 @@ namespace LabTools
         }
     }
 
-    // ========================================================================  
-    // MODERN CAPSULE TOGGLE SWITCH CONTROL ("HybridShip" ON/OFF)
-    // ========================================================================  
     public class CapsuleToggleSwitch : Control
     {
         private bool isOn = false;
@@ -3928,7 +3935,7 @@ namespace LabTools
                 e.Graphics.FillEllipse(knobBrush, knobX, knobY, knobSize, knobSize);
             }
 
-            string labelText = isOn ? "ON" : "OFF";
+string labelText = isOn ? "ON" : "OFF";
             using (Font f = new Font("Segoe UI", 8.5f, FontStyle.Bold))
             {
                 Rectangle textRect = isOn
@@ -3944,1271 +3951,6 @@ namespace LabTools
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
                 );
             }
-        }
-    }
-  
-    // ========================================================================  
-    // CABIN ORDER DATA MODEL  
-    // ========================================================================  
-    public class CabinOrderInfo
-    {
-        public string OrderId { get; set; } = "";
-        public string Cabin { get; set; } = "";
-        public string PrintSize { get; set; } = "";
-        public string OrderType { get; set; } = "Package";
-        public int Qty { get; set; } = 1;
-        public string SourcePath { get; set; } = "";
-        public List<string> FilePaths { get; set; } = new List<string>();
-
-        public override string ToString()
-        {
-            string sizeLabel = string.IsNullOrEmpty(PrintSize) ? "" : " • " + PrintSize;
-            return $"{OrderId} ({FilePaths.Count} photo{(FilePaths.Count == 1 ? "" : "s")}{sizeLabel})";
-        }
-    }
-
-    // ========================================================================  
-    // ORDER PHOTO VIEWER & SELECTOR MODAL (1-PRESS SELECTION + BICUBIC PREVIEW)  
-    // ========================================================================  
-    public class OrderPhotoViewerForm : Form
-    {
-        public List<string> SelectedPhotoPaths { get; private set; } = new List<string>();
-        private CabinOrderInfo order;
-        private string printedFolder;
-
-        private CheckedListBox lstPhotos;
-        private PictureBox picThumb;
-        private Label lblCount;
-
-        public OrderPhotoViewerForm(CabinOrderInfo order, string printedFolder)
-        {
-            this.order = order;
-            this.printedFolder = !string.IsNullOrWhiteSpace(printedFolder) ? printedFolder : @"Z:\Printed";
-
-            this.Text = "Order " + order.OrderId + " - Photos (Cabin " + order.Cabin + ")";
-            this.Size = new Size(720, 520);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.BackColor = Color.FromArgb(43, 43, 43);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-
-            Label lblHeader = new Label()
-            {
-                Text = $"Order {order.OrderId}   •   Cabin: {order.Cabin}   •   Size: {order.PrintSize}   •   Total Photos: {order.FilePaths.Count}",
-                Location = new Point(20, 15),
-                AutoSize = true,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-            };
-
-            lstPhotos = new CheckedListBox()
-            {
-                Location = new Point(20, 45),
-                Width = 380,
-                Height = 320,
-                BackColor = Color.FromArgb(50, 50, 50),
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9.5f),
-                CheckOnClick = true
-            };
-
-            for (int i = 0; i < order.FilePaths.Count; i++)
-            {
-                string p = order.FilePaths[i];
-                string displayName = Path.GetFileName(p);
-                lstPhotos.Items.Add(new PhotoCheckItem { FileName = displayName, FullPath = p }, true);
-            }
-
-            lstPhotos.SelectedIndexChanged += (s, e) => { ShowSelectedPreview(); };
-            lstPhotos.ItemCheck += (s, e) => {
-                this.BeginInvoke(new Action(UpdateSelectionLabel));
-            };
-
-            Button btnSelectAll = new Button()
-            {
-                Text = "Select All",
-                Location = new Point(20, 375),
-                Width = 110,
-                Height = 30,
-                BackColor = Color.FromArgb(54, 54, 54),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 8.5f)
-            };
-            btnSelectAll.Click += (s, e) =>
-            {
-                lstPhotos.BeginUpdate();
-                for (int i = 0; i < lstPhotos.Items.Count; i++) lstPhotos.SetItemChecked(i, true);
-                lstPhotos.EndUpdate();
-                UpdateSelectionLabel();
-            };
-
-            Button btnUnselectAll = new Button()
-            {
-                Text = "Unselect All",
-                Location = new Point(140, 375),
-                Width = 110,
-                Height = 30,
-                BackColor = Color.FromArgb(54, 54, 54),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 8.5f)
-            };
-            btnUnselectAll.Click += (s, e) =>
-            {
-                lstPhotos.BeginUpdate();
-                for (int i = 0; i < lstPhotos.Items.Count; i++) lstPhotos.SetItemChecked(i, false);
-                lstPhotos.EndUpdate();
-                UpdateSelectionLabel();
-            };
-
-            lblCount = new Label()
-            {
-                Text = $"{order.FilePaths.Count} of {order.FilePaths.Count} selected",
-                Location = new Point(260, 381),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(68, 220, 108),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
-            };
-
-            Label lblPreviewHeader = new Label()
-            {
-                Text = "Image Preview:",
-                Location = new Point(420, 45),
-                AutoSize = true,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
-            };
-
-            picThumb = new PictureBox()
-            {
-                Location = new Point(420, 70),
-                Width = 260,
-                Height = 195,
-                BackColor = Color.FromArgb(24, 25, 29),
-                BorderStyle = BorderStyle.FixedSingle,
-                SizeMode = PictureBoxSizeMode.Zoom
-            };
-
-            Label lblFileStatus = new Label()
-            {
-                Text = "Click any photo to preview.",
-                Location = new Point(420, 275),
-                Width = 260,
-                Height = 60,
-                ForeColor = Color.LightGray,
-                Font = new Font("Segoe UI", 8.5f)
-            };
-
-            Button btnImport = new Button()
-            {
-                Text = "Import Selected for Printing",
-                Location = new Point(240, 425),
-                Width = 270,
-                Height = 40,
-                BackColor = Color.FromArgb(18, 142, 130),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold)
-            };
-            btnImport.Click += (s, e) =>
-            {
-                SelectedPhotoPaths.Clear();
-                foreach (var item in lstPhotos.CheckedItems.OfType<PhotoCheckItem>())
-                {
-                    SelectedPhotoPaths.Add(item.FullPath);
-                }
-
-                if (SelectedPhotoPaths.Count == 0)
-                {
-                    MessageBox.Show("Please check at least one photo to import.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-
-                this.DialogResult = DialogResult.OK;
-                this.Close();
-            };
-
-            Button btnCancel = new Button()
-            {
-                Text = "Cancel",
-                Location = new Point(530, 425),
-                Width = 150,
-                Height = 40,
-                BackColor = Color.FromArgb(54, 54, 54),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9.5f)
-            };
-            btnCancel.Click += (s, e) =>
-            {
-                this.DialogResult = DialogResult.Cancel;
-                this.Close();
-            };
-
-            this.Controls.Add(lblHeader);
-            this.Controls.Add(lstPhotos);
-            this.Controls.Add(btnSelectAll);
-            this.Controls.Add(btnUnselectAll);
-            this.Controls.Add(lblCount);
-            this.Controls.Add(lblPreviewHeader);
-            this.Controls.Add(picThumb);
-            this.Controls.Add(lblFileStatus);
-            this.Controls.Add(btnImport);
-            this.Controls.Add(btnCancel);
-
-            MainForm.ApplyDialogTheme(this);
-
-            if (lstPhotos.Items.Count > 0)
-            {
-                lstPhotos.SelectedIndex = 0;
-                ShowSelectedPreview();
-            }
-        }
-
-        private void UpdateSelectionLabel()
-        {
-            lblCount.Text = $"{lstPhotos.CheckedItems.Count} of {lstPhotos.Items.Count} selected";
-        }
-
-        private void ShowSelectedPreview()
-        {
-            if (lstPhotos.SelectedItem is PhotoCheckItem item)
-            {
-                string resolvedPath = item.FullPath;
-                if (!File.Exists(resolvedPath))
-                {
-                    string candidate = Path.Combine(printedFolder, item.FileName);
-                    if (File.Exists(candidate)) resolvedPath = candidate;
-                }
-
-                if (File.Exists(resolvedPath))
-                {
-                    try
-                    {
-                        byte[] bytes = File.ReadAllBytes(resolvedPath);
-                        using (var ms = new MemoryStream(bytes))
-                        using (var img = Image.FromStream(ms))
-                        {
-                            Bitmap bmp = new Bitmap(picThumb.Width, picThumb.Height);
-                            using (Graphics g = Graphics.FromImage(bmp))
-                            {
-                                g.Clear(Color.FromArgb(24, 25, 29));
-                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                                g.SmoothingMode = SmoothingMode.HighQuality;
-
-                                double rX = (double)picThumb.Width / img.Width;
-                                double rY = (double)picThumb.Height / img.Height;
-                                double r = Math.Min(rX, rY);
-
-                                int w = (int)(img.Width * r);
-                                int h = (int)(img.Height * r);
-                                int x = (picThumb.Width - w) / 2;
-                                int y = (picThumb.Height - h) / 2;
-
-                                g.DrawImage(img, x, y, w, h);
-                            }
-
-                            Image? old = picThumb.Image;
-                            picThumb.Image = bmp;
-                            old?.Dispose();
-                        }
-                    }
-                    catch
-                    {
-                        picThumb.Image = null;
-                    }
-                }
-                else
-                {
-                    picThumb.Image = null;
-                }
-            }
-        }
-
-        protected override void OnFormClosed(FormClosedEventArgs e)
-        {
-            picThumb.Image?.Dispose();
-            base.OnFormClosed(e);
-        }
-
-        private class PhotoCheckItem
-        {
-            public string FileName { get; set; } = "";
-            public string FullPath { get; set; } = "";
-            public override string ToString() => FileName;
-        }
-    }
-
-    // ========================================================================  
-    // MEDIA SIZE MANAGER FORM (SINGLE "COMBO" VS MULTI-BLOCK "AND" CONFIGURATOR)
-    // ========================================================================  
-    public class MediaSizeManagerForm : Form
-    {
-        private AppConfig config;
-        private ListBox lstSizes;
-        private TextBox txtNewSize;
-        private RadioButton rbSingleBlock;
-        private RadioButton rbMultiBlock;
-        private TextBox txtBlock1Size;
-        private TextBox txtBlock1PrintName;
-        private TextBox txtBlock2Size;
-        private TextBox txtBlock2PrintName;
-        private Label lblBlock2Header;
-        private Label lblBlock2Size;
-        private Label lblBlock2Print;
-        private bool isPopulatingFields = false;
-
-        private class SizeListItem
-        {
-            public string Name { get; set; } = "";
-            public string Display { get; set; } = "";
-            public override string ToString() => Display;
-        }
-
-        public MediaSizeManagerForm(AppConfig activeConfig)
-        {
-            this.config = activeConfig;
-            this.Text = "Manage Media Print Sizes";
-            this.Size = new Size(620, 540);
-            this.StartPosition = FormStartPosition.CenterParent;
-            this.BackColor = Color.FromArgb(43, 43, 43);
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;
-            this.MaximizeBox = false;
-            this.MinimizeBox = false;
-
-            Label lblInfo = new Label()
-            {
-                Text = "Current Media Sizes in Dropdown (Click any size to inspect or edit its order ticket blocks):",
-                Location = new Point(20, 15),
-                AutoSize = true,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-
-            lstSizes = new ListBox()
-            {
-                Location = new Point(20, 38),
-                Width = 565,
-                Height = 175,
-                BackColor = Color.FromArgb(50, 50, 50),
-                ForeColor = Color.White,
-                Font = new Font("Consolas", 9.5f)
-            };
-            lstSizes.SelectedIndexChanged += LstSizes_SelectedIndexChanged;
-
-            Label lblSection = new Label()
-            {
-                Text = "Add / Edit Media Size & Order Ticket Format:",
-                Location = new Point(20, 224),
-                AutoSize = true,
-                ForeColor = Color.FromArgb(130, 220, 210),
-                Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-            };
-
-            Label lblNew = new Label()
-            {
-                Text = "Dropdown Name:",
-                Location = new Point(20, 254),
-                Width = 115,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-            txtNewSize = new TextBox()
-            {
-                Location = new Point(140, 251),
-                Width = 445,
-                Height = 25,
-                Font = new Font("Segoe UI", 9.5f)
-            };
-            txtNewSize.TextChanged += TxtNewSize_TextChanged;
-
-            Label lblOutputMode = new Label()
-            {
-                Text = "Ticket Output:",
-                Location = new Point(20, 288),
-                Width = 115,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-
-            rbSingleBlock = new RadioButton()
-            {
-                Text = "Single Block (\"Combo\" / 1 Paper)",
-                Location = new Point(140, 286),
-                Width = 215,
-                ForeColor = Color.White,
-                Checked = true,
-                Font = new Font("Segoe UI", 9)
-            };
-
-            rbMultiBlock = new RadioButton()
-            {
-                Text = "Multi-Block (\"and\" / Split into 2 Orders)",
-                Location = new Point(360, 286),
-                Width = 235,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-
-            rbSingleBlock.CheckedChanged += (s, e) => UpdateBlock2State();
-            rbMultiBlock.CheckedChanged += (s, e) => UpdateBlock2State();
-
-            Label lblBlock1Header = new Label()
-            {
-                Text = "Block 1 ->",
-                Location = new Point(20, 325),
-                Width = 75,
-                ForeColor = Color.FromArgb(68, 220, 108),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            Label lblBlock1Size = new Label()
-            {
-                Text = "Size=",
-                Location = new Point(95, 325),
-                Width = 42,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-            txtBlock1Size = new TextBox()
-            {
-                Location = new Point(140, 322),
-                Width = 175,
-                Height = 25,
-                Font = new Font("Segoe UI", 9)
-            };
-            Label lblBlock1Print = new Label()
-            {
-                Text = "PrintName=",
-                Location = new Point(325, 325),
-                Width = 75,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-            txtBlock1PrintName = new TextBox()
-            {
-                Location = new Point(402, 322),
-                Width = 183,
-                Height = 25,
-                Font = new Font("Segoe UI", 9)
-            };
-
-            lblBlock2Header = new Label()
-            {
-                Text = "Block 2 ->",
-                Location = new Point(20, 362),
-                Width = 75,
-                ForeColor = Color.FromArgb(68, 220, 108),
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            lblBlock2Size = new Label()
-            {
-                Text = "Size=",
-                Location = new Point(95, 362),
-                Width = 42,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-            txtBlock2Size = new TextBox()
-            {
-                Location = new Point(140, 359),
-                Width = 175,
-                Height = 25,
-                Font = new Font("Segoe UI", 9)
-            };
-            lblBlock2Print = new Label()
-            {
-                Text = "PrintName=",
-                Location = new Point(325, 362),
-                Width = 75,
-                ForeColor = Color.White,
-                Font = new Font("Segoe UI", 9)
-            };
-            txtBlock2PrintName = new TextBox()
-            {
-                Location = new Point(402, 359),
-                Width = 183,
-                Height = 25,
-                Font = new Font("Segoe UI", 9)
-            };
-
-            Label lblHint = new Label()
-            {
-                Text = "Tip: Names with \"Combo\" stay on 1 block. Names with \"and\" automatically split into 2 blocks.",
-                Location = new Point(20, 398),
-                AutoSize = true,
-                ForeColor = Color.LightGray,
-                Font = new Font("Segoe UI", 8.25f, FontStyle.Italic)
-            };
-
-            Button btnAdd = new Button()
-            {
-                Text = "+ Add / Save Size",
-                Location = new Point(20, 435),
-                Width = 155,
-                Height = 38,
-                BackColor = Color.FromArgb(18, 142, 130),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            btnAdd.Click += BtnAdd_Click;
-
-            Button btnRemove = new Button()
-            {
-                Text = "Remove Selected",
-                Location = new Point(185, 435),
-                Width = 140,
-                Height = 38,
-                BackColor = Color.FromArgb(180, 50, 50),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9)
-            };
-            btnRemove.Click += BtnRemove_Click;
-
-            Button btnReset = new Button()
-            {
-                Text = "Reset Defaults",
-                Location = new Point(335, 435),
-                Width = 125,
-                Height = 38,
-                BackColor = Color.FromArgb(54, 54, 54),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9)
-            };
-            btnReset.Click += BtnReset_Click;
-
-            Button btnClose = new Button()
-            {
-                Text = "Done",
-                Location = new Point(470, 435),
-                Width = 115,
-                Height = 38,
-                BackColor = Color.FromArgb(24, 132, 247),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            btnClose.Click += (s, e) => this.Close();
-
-            this.Controls.Add(lblInfo);
-            this.Controls.Add(lstSizes);
-            this.Controls.Add(lblSection);
-            this.Controls.Add(lblNew);
-            this.Controls.Add(txtNewSize);
-            this.Controls.Add(lblOutputMode);
-            this.Controls.Add(rbSingleBlock);
-            this.Controls.Add(rbMultiBlock);
-            this.Controls.Add(lblBlock1Header);
-            this.Controls.Add(lblBlock1Size);
-            this.Controls.Add(txtBlock1Size);
-            this.Controls.Add(lblBlock1Print);
-            this.Controls.Add(txtBlock1PrintName);
-            this.Controls.Add(lblBlock2Header);
-            this.Controls.Add(lblBlock2Size);
-            this.Controls.Add(txtBlock2Size);
-            this.Controls.Add(lblBlock2Print);
-            this.Controls.Add(txtBlock2PrintName);
-            this.Controls.Add(lblHint);
-            this.Controls.Add(btnAdd);
-            this.Controls.Add(btnRemove);
-            this.Controls.Add(btnReset);
-            this.Controls.Add(btnClose);
-
-            RefreshList();
-            UpdateBlock2State();
-        }
-
-        private void UpdateBlock2State()
-        {
-            bool multi = rbMultiBlock.Checked;
-            lblBlock2Header.Enabled = multi;
-            lblBlock2Size.Enabled = multi;
-            txtBlock2Size.Enabled = multi;
-            lblBlock2Print.Enabled = multi;
-            txtBlock2PrintName.Enabled = multi;
-
-            if (multi && string.IsNullOrWhiteSpace(txtBlock2Size.Text))
-            {
-                txtBlock2Size.Text = "4-Wallets (vert)";
-                txtBlock2PrintName.Text = "4-Wallets (vert)";
-            }
-        }
-
-        private void LstSizes_SelectedIndexChanged(object? sender, EventArgs e)
-        {
-            if (lstSizes.SelectedItem is SizeListItem item)
-            {
-                isPopulatingFields = true;
-                MediaSizeRule rule = config.GetEffectiveRule(item.Name);
-                txtNewSize.Text = item.Name;
-                rbMultiBlock.Checked = rule.IsMultiBlock;
-                rbSingleBlock.Checked = !rule.IsMultiBlock;
-                txtBlock1Size.Text = rule.Block1Size;
-                txtBlock1PrintName.Text = rule.Block1PrintName;
-                txtBlock2Size.Text = rule.Block2Size;
-                txtBlock2PrintName.Text = rule.Block2PrintName;
-                UpdateBlock2State();
-                isPopulatingFields = false;
-            }
-        }
-
-        private void TxtNewSize_TextChanged(object? sender, EventArgs e)
-        {
-            if (isPopulatingFields) return;
-
-            string typed = txtNewSize.Text.Trim();
-            if (string.IsNullOrEmpty(typed))
-            {
-                txtBlock1Size.Clear();
-                txtBlock1PrintName.Clear();
-                return;
-            }
-
-            MediaSizeRule autoRule = config.GetEffectiveRule(typed);
-            rbMultiBlock.Checked = autoRule.IsMultiBlock;
-            rbSingleBlock.Checked = !autoRule.IsMultiBlock;
-            txtBlock1Size.Text = autoRule.Block1Size;
-            txtBlock1PrintName.Text = autoRule.Block1PrintName;
-            txtBlock2Size.Text = autoRule.Block2Size;
-            txtBlock2PrintName.Text = autoRule.Block2PrintName;
-            UpdateBlock2State();
-        }
-
-        private void BtnAdd_Click(object? sender, EventArgs e)
-        {
-            string name = txtNewSize.Text.Trim();
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                MessageBox.Show("Please enter a Dropdown Name for the media size.", "Missing Name", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            string b1Size = string.IsNullOrWhiteSpace(txtBlock1Size.Text) ? name : txtBlock1Size.Text.Trim();
-            string b1Print = string.IsNullOrWhiteSpace(txtBlock1PrintName.Text) ? b1Size : txtBlock1PrintName.Text.Trim();
-            string b2Size = txtBlock2Size.Text.Trim();
-            string b2Print = string.IsNullOrWhiteSpace(txtBlock2PrintName.Text) ? b2Size : txtBlock2PrintName.Text.Trim();
-
-            if (rbMultiBlock.Checked && string.IsNullOrWhiteSpace(b2Size))
-            {
-                MessageBox.Show("Please enter the Block 2 Size (e.g. 4-Wallets (vert)) for Multi-Block output.", "Missing Block 2", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-
-            if (config.MediaSizes == null)
-                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
-
-            if (!config.MediaSizes.Contains(name, StringComparer.OrdinalIgnoreCase))
-            {
-                config.MediaSizes.Add(name);
-            }
-
-            if (config.MediaSizeRules == null)
-                config.MediaSizeRules = new List<MediaSizeRule>();
-
-            config.MediaSizeRules.RemoveAll(r => r.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            config.MediaSizeRules.Add(new MediaSizeRule
-            {
-                Name = name,
-                IsMultiBlock = rbMultiBlock.Checked,
-                Block1Size = b1Size,
-                Block1PrintName = b1Print,
-                Block2Size = rbMultiBlock.Checked ? b2Size : "",
-                Block2PrintName = rbMultiBlock.Checked ? b2Print : ""
-            });
-
-            config.Save();
-            RefreshList();
-        }
-
-        private void BtnRemove_Click(object? sender, EventArgs e)
-        {
-            if (lstSizes.SelectedItem is SizeListItem sel)
-            {
-                config.MediaSizes?.RemoveAll(x => x.Equals(sel.Name, StringComparison.OrdinalIgnoreCase));
-                config.MediaSizeRules?.RemoveAll(r => r.Name.Equals(sel.Name, StringComparison.OrdinalIgnoreCase));
-                config.Save();
-                RefreshList();
-            }
-        }
-
-        private void BtnReset_Click(object? sender, EventArgs e)
-        {
-            if (MessageBox.Show("Reset media sizes and block rules to factory defaults?", "Confirm Reset", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
-            {
-                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
-                config.MediaSizeRules = new List<MediaSizeRule>();
-                config.Save();
-                RefreshList();
-            }
-        }
-
-        private void RefreshList()
-        {
-            lstSizes.Items.Clear();
-            if (config.MediaSizes == null || config.MediaSizes.Count == 0)
-            {
-                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
-            }
-
-            foreach (var size in config.MediaSizes)
-            {
-                MediaSizeRule rule = config.GetEffectiveRule(size);
-                string tag;
-                if (rule.IsMultiBlock)
-                    tag = $"[2-Blocks: {rule.Block1Size} + {rule.Block2Size}]";
-                else if (size.IndexOf("combo", StringComparison.OrdinalIgnoreCase) >= 0)
-                    tag = "[1-Page Combo]";
-                else
-                    tag = "[Single]";
-
-                string padded = size.Length < 34 ? size.PadRight(34) : size + "  ";
-                lstSizes.Items.Add(new SizeListItem
-                {
-                    Name = size,
-                    Display = $"{padded} {tag}"
-                });
-            }
-        }
-    }
-
-    // ========================================================================  
-    // CUSTOM TEMPLATE MANAGER FORM  
-    // ========================================================================  
-    public class TemplateManagerForm : Form  
-    {  
-        private ListBox lstTemplates;  
-        private TextBox txtName;  
-        private TextBox txtPath;  
-        private CheckBox chkDual;  
-  
-        public TemplateManagerForm()  
-        {  
-            this.Text = "Custom Template Manager";  
-            this.Size = new Size(500, 420);  
-            this.StartPosition = FormStartPosition.CenterParent;  
-            this.BackColor = Color.FromArgb(43, 43, 43);  
-            this.FormBorderStyle = FormBorderStyle.FixedDialog;  
-            this.MaximizeBox = false;  
-  
-            Label lblInfo = new Label() { Text = "Add custom border PNGs to inject them into the Print Size menu.", Location = new Point(20, 15), AutoSize = true, ForeColor = Color.White };  
-  
-            lstTemplates = new ListBox() { Location = new Point(20, 40), Width = 445, Height = 130, BackColor = Color.FromArgb(50, 50, 50), ForeColor = Color.White };  
-            RefreshList();  
-  
-            Label lblName = new Label() { Text = "Template Name (e.g. 8x10 Fall Border):", Location = new Point(20, 185), AutoSize = true, ForeColor = Color.White };  
-            txtName = new TextBox() { Location = new Point(20, 205), Width = 445, Height = 25 };  
-  
-            Label lblPath = new Label() { Text = "PNG Border File Path:", Location = new Point(20, 240), AutoSize = true, ForeColor = Color.White };  
-            txtPath = new TextBox() { Location = new Point(20, 260), Width = 360, Height = 25 };  
-            Button btnBrowse = new Button() { Text = "Browse", Location = new Point(390, 259), Width = 75, Height = 27, BackColor = Color.FromArgb(54, 54, 54), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
-            btnBrowse.Click += (s, e) => { using (OpenFileDialog ofd = new OpenFileDialog() { Filter = "PNG Image|*.png" }) { if (ofd.ShowDialog() == DialogResult.OK) txtPath.Text = ofd.FileName; } };  
-  
-            chkDual = new CheckBox() { Text = "This is a 2-Photo Split Border (like Mini Porthole)", Location = new Point(20, 295), Width = 350, ForeColor = Color.White };  
-  
-            Button btnAdd = new Button() { Text = "Add / Update Template", Location = new Point(20, 330), Width = 170, Height = 35, BackColor = Color.FromArgb(18, 142, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
-            btnAdd.Click += BtnAdd_Click;  
-  
-            Button btnRemove = new Button() { Text = "Remove Selected", Location = new Point(200, 330), Width = 140, Height = 35, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
-            btnRemove.Click += BtnRemove_Click;  
-  
-            Button btnClose = new Button() { Text = "Close", Location = new Point(375, 330), Width = 90, Height = 35, BackColor = Color.FromArgb(54, 54, 54), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
-            btnClose.Click += (s, e) => this.Close();  
-  
-            this.Controls.Add(lblInfo); this.Controls.Add(lstTemplates);  
-            this.Controls.Add(lblName); this.Controls.Add(txtName);  
-            this.Controls.Add(lblPath); this.Controls.Add(txtPath); this.Controls.Add(btnBrowse);  
-            this.Controls.Add(chkDual); this.Controls.Add(btnAdd); this.Controls.Add(btnRemove); this.Controls.Add(btnClose);  
-        }  
-  
-        private void RefreshList()  
-        {  
-            lstTemplates.Items.Clear();  
-            if (File.Exists("CustomTemplates.txt"))  
-            {  
-                foreach (var line in Program.SafeReadAllLines("CustomTemplates.txt"))  
-                {  
-                    if (line.Contains("|")) lstTemplates.Items.Add(line.Split('|')[0].Trim());  
-                }  
-            }  
-        }  
-  
-        private void BtnAdd_Click(object? sender, EventArgs e)  
-        {  
-            string name = txtName.Text.Trim();  
-            string path = txtPath.Text.Trim();  
-            if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(path)) { MessageBox.Show("Name and Path are required."); return; }  
-  
-            var lines = File.Exists("CustomTemplates.txt") ? Program.SafeReadAllLines("CustomTemplates.txt").ToList() : new List<string>();  
-            lines.RemoveAll(l => l.StartsWith(name + "|", StringComparison.OrdinalIgnoreCase));  
-            lines.Add($"{name}|{path}|{chkDual.Checked}");  
-  
-            Program.SafeWriteAllText("CustomTemplates.txt", string.Join(Environment.NewLine, lines));  
-            txtName.Clear(); txtPath.Clear(); chkDual.Checked = false;  
-            RefreshList();  
-        }  
-  
-        private void BtnRemove_Click(object? sender, EventArgs e)  
-        {  
-            if (lstTemplates.SelectedItem == null) return;  
-            string name = lstTemplates.SelectedItem.ToString() ?? "";  
-              
-            var lines = Program.SafeReadAllLines("CustomTemplates.txt").ToList();  
-            lines.RemoveAll(l => l.StartsWith(name + "|", StringComparison.OrdinalIgnoreCase));  
-            Program.SafeWriteAllText("CustomTemplates.txt", string.Join(Environment.NewLine, lines));  
-            RefreshList();  
-        }  
-    }  
-  
-    // ========================================================================  
-    // BORDER ADJUSTMENT TOOL (Optimized with Dynamic Fast Rendering)  
-    // ========================================================================  
-    public class BorderAdjustForm : Form  
-    {  
-        public Image? FlattenedImage { get; private set; }  
-        private Image originalPhoto;  
-        private Image borderLayer;  
-        private MemoryStream photoStream;  
-        private MemoryStream borderStream;  
-          
-        private System.Windows.Forms.Timer renderTimer;  
-        private bool isFastRender = false;  
-          
-        private class PhotoState {  
-            public float Zoom = 1.0f;  
-            public PointF Pan = new PointF(0, 0);  
-            public RectangleF ClipBounds;  
-        }  
-  
-        private List<PhotoState> photos = new List<PhotoState>();  
-        private int activeIndex = 0;  
-        private bool isDualPhoto = false;  
-  
-        private Point lastMousePos;  
-        private bool isDragging = false;  
-        private PictureBox canvas;  
-        private TrackBar tbZoom;  
-  
-        public BorderAdjustForm(string photoPath, string borderPath, bool dualPhoto)  
-        {  
-            this.Text = "Adjust Photo Border - " + Path.GetFileName(photoPath);  
-            this.Size = new Size(900, 750);  
-            this.StartPosition = FormStartPosition.CenterParent;  
-            this.BackColor = Color.FromArgb(43, 43, 43);  
-            this.isDualPhoto = dualPhoto;  
-  
-            byte[] photoBytes = File.ReadAllBytes(photoPath);  
-            byte[] borderBytes = File.ReadAllBytes(borderPath);  
-            photoStream = new MemoryStream(photoBytes);  
-            borderStream = new MemoryStream(borderBytes);  
-              
-            originalPhoto = Image.FromStream(photoStream);  
-            borderLayer = Image.FromStream(borderStream);  
-  
-            if (isDualPhoto)  
-            {  
-                if (borderLayer.Width > borderLayer.Height)   
-                {  
-                    photos.Add(new PhotoState { ClipBounds = new RectangleF(0, 0, borderLayer.Width / 2f, borderLayer.Height) });  
-                    photos.Add(new PhotoState { ClipBounds = new RectangleF(borderLayer.Width / 2f, 0, borderLayer.Width / 2f, borderLayer.Height) });  
-                }  
-                else   
-                {  
-                    photos.Add(new PhotoState { ClipBounds = new RectangleF(0, 0, borderLayer.Width, borderLayer.Height / 2f) });  
-                    photos.Add(new PhotoState { ClipBounds = new RectangleF(0, borderLayer.Height / 2f, borderLayer.Width, borderLayer.Height / 2f) });  
-                }  
-            }  
-            else  
-            {  
-                photos.Add(new PhotoState { ClipBounds = new RectangleF(0, 0, borderLayer.Width, borderLayer.Height) });  
-            }  
-  
-            foreach (var p in photos)   
-            {  
-                float rX = p.ClipBounds.Width / originalPhoto.Width;  
-                float rY = p.ClipBounds.Height / originalPhoto.Height;  
-                p.Zoom = Math.Max(rX, rY);   
-            }  
-  
-            Label lblInst = new Label() { Text = isDualPhoto ? "Click a side to select. Scroll Wheel to Zoom. Drag to Move." : "Scroll Mouse Wheel to Zoom. Click and Drag to Move.", ForeColor = Color.White, Location = new Point(20, 15), AutoSize = true, Font = new Font("Segoe UI", 10, FontStyle.Bold) };  
-              
-            Button btnApply = new Button() { Text = "Apply && Print", Location = new Point(620, 10), Width = 140, Height = 35, BackColor = Color.FromArgb(18, 142, 130), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold) };  
-            btnApply.Click += BtnApply_Click;  
-  
-            Button btnCancel = new Button() { Text = "Cancel", Location = new Point(770, 10), Width = 90, Height = 35, BackColor = Color.FromArgb(180, 50, 50), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };  
-            btnCancel.Click += (s, e) => { this.DialogResult = DialogResult.Cancel; this.Close(); };  
-  
-            renderTimer = new System.Windows.Forms.Timer { Interval = 150 };  
-            renderTimer.Tick += (s, e) => { renderTimer.Stop(); isFastRender = false; canvas.Invalidate(); };  
-  
-            tbZoom = new TrackBar() { Location = new Point(360, 15), Width = 240, Minimum = 10, Maximum = 300, Value = (int)(photos[activeIndex].Zoom * 100), TickStyle = TickStyle.None };  
-            tbZoom.ValueChanged += (s, e) =>   
-            {   
-                photos[activeIndex].Zoom = tbZoom.Value / 100f;   
-                isFastRender = true;   
-                renderTimer.Stop();   
-                renderTimer.Start();   
-                canvas.Invalidate();   
-            };  
-  
-            canvas = new PictureBox() { Location = new Point(20, 55), Width = 840, Height = 640, BackColor = Color.FromArgb(20, 20, 20), BorderStyle = BorderStyle.FixedSingle, Cursor = Cursors.SizeAll };  
-            canvas.Paint += Canvas_Paint;  
-              
-            canvas.MouseDown += (s, e) =>   
-            {   
-                isDragging = true;   
-                isFastRender = true;  
-                renderTimer.Stop();  
-                lastMousePos = e.Location;   
-                  
-                float uiScale = Math.Min((float)canvas.Width / borderLayer.Width, (float)canvas.Height / borderLayer.Height);  
-                int drawW = (int)(borderLayer.Width * uiScale);  
-                int drawH = (int)(borderLayer.Height * uiScale);  
-                int offsetX = (canvas.Width - drawW) / 2;  
-                int offsetY = (canvas.Height - drawH) / 2;  
-  
-                float clickX = (e.X - offsetX) / uiScale;  
-                float clickY = (e.Y - offsetY) / uiScale;  
-  
-                for (int i = 0; i < photos.Count; i++)   
-                {  
-                    if (photos[i].ClipBounds.Contains(clickX, clickY))   
-                    {  
-                        activeIndex = i;  
-                        tbZoom.Value = Math.Min(Math.Max((int)(photos[i].Zoom * 100), tbZoom.Minimum), tbZoom.Maximum);  
-                        break;  
-                    }  
-                }  
-                canvas.Invalidate();  
-            };  
-              
-            canvas.MouseUp += (s, e) =>   
-            {   
-                isDragging = false;   
-                renderTimer.Start();   
-            };  
-              
-            canvas.MouseMove += (s, e) =>  
-            {  
-                if (isDragging)  
-                {  
-                    photos[activeIndex].Pan.X += (e.X - lastMousePos.X);  
-                    photos[activeIndex].Pan.Y += (e.Y - lastMousePos.Y);  
-                    lastMousePos = e.Location;  
-                    canvas.Invalidate();  
-                }  
-            };  
-              
-            canvas.MouseWheel += (s, e) =>   
-            {  
-                int newZoom = (int)(photos[activeIndex].Zoom * 100) + (e.Delta > 0 ? 10 : -10);  
-                if (newZoom >= tbZoom.Minimum && newZoom <= tbZoom.Maximum)  
-                {  
-                    tbZoom.Value = newZoom;   
-                }  
-                isFastRender = true;  
-                renderTimer.Stop();  
-                renderTimer.Start();  
-            };  
-  
-            this.Controls.Add(lblInst);  
-            this.Controls.Add(tbZoom);  
-            this.Controls.Add(btnApply);  
-            this.Controls.Add(btnCancel);  
-            this.Controls.Add(canvas);  
-            MainForm.ApplyDialogTheme(this);
-        }  
-  
-        private void Canvas_Paint(object? sender, PaintEventArgs e)  
-        {  
-            e.Graphics.Clear(Color.Black);  
-  
-            if (isFastRender || isDragging)  
-            {  
-                e.Graphics.InterpolationMode = InterpolationMode.Bilinear;  
-                e.Graphics.SmoothingMode = SmoothingMode.HighSpeed;  
-                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;  
-                e.Graphics.CompositingQuality = CompositingQuality.HighSpeed;  
-            }  
-            else  
-            {  
-                e.Graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;  
-                e.Graphics.SmoothingMode = SmoothingMode.HighQuality;  
-                e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;  
-                e.Graphics.CompositingQuality = CompositingQuality.HighQuality;  
-            }  
-  
-            float uiScale = Math.Min((float)canvas.Width / borderLayer.Width, (float)canvas.Height / borderLayer.Height);  
-            int drawW = (int)(borderLayer.Width * uiScale);  
-            int drawH = (int)(borderLayer.Height * uiScale);  
-            int offsetX = (canvas.Width - drawW) / 2;  
-            int offsetY = (canvas.Height - drawH) / 2;  
-  
-            e.Graphics.TranslateTransform(offsetX, offsetY);  
-            e.Graphics.ScaleTransform(uiScale, uiScale);  
-  
-            for (int i = 0; i < photos.Count; i++)  
-            {  
-                var p = photos[i];  
-                e.Graphics.SetClip(p.ClipBounds);  
-                  
-                float photoW = originalPhoto.Width * p.Zoom;  
-                float photoH = originalPhoto.Height * p.Zoom;  
-                float photoX = p.ClipBounds.X + (p.ClipBounds.Width - photoW) / 2 + (p.Pan.X / uiScale);  
-                float photoY = p.ClipBounds.Y + (p.ClipBounds.Height - photoH) / 2 + (p.Pan.Y / uiScale);  
-                  
-                e.Graphics.DrawImage(originalPhoto, photoX, photoY, photoW, photoH);  
-            }  
-  
-            e.Graphics.ResetClip();  
-            e.Graphics.DrawImage(borderLayer, 0, 0, borderLayer.Width, borderLayer.Height);  
-        }  
-  
-        private void BtnApply_Click(object? sender, EventArgs e)  
-        {  
-            Bitmap finalBmp = new Bitmap(borderLayer.Width, borderLayer.Height);  
-            using (Graphics g = Graphics.FromImage(finalBmp))  
-            {  
-                g.Clear(Color.White);  
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;  
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;  
-                g.SmoothingMode = SmoothingMode.HighQuality;  
-  
-                float uiScale = Math.Min((float)canvas.Width / borderLayer.Width, (float)canvas.Height / borderLayer.Height);  
-  
-                for (int i = 0; i < photos.Count; i++)  
-                {  
-                    var p = photos[i];  
-                    g.SetClip(p.ClipBounds);  
-                      
-                    float photoW = originalPhoto.Width * p.Zoom;  
-                    float photoH = originalPhoto.Height * p.Zoom;  
-                    float photoX = p.ClipBounds.X + (p.ClipBounds.Width - photoW) / 2 + (p.Pan.X / uiScale);  
-                    float photoY = p.ClipBounds.Y + (p.ClipBounds.Height - photoH) / 2 + (p.Pan.Y / uiScale);  
-                      
-                    g.DrawImage(originalPhoto, photoX, photoY, photoW, photoH);  
-                }  
-  
-                g.ResetClip();  
-                g.DrawImage(borderLayer, 0, 0, borderLayer.Width, borderLayer.Height);  
-            }  
-              
-            FlattenedImage = finalBmp;  
-            this.DialogResult = DialogResult.OK;  
-            this.Close();  
-        }  
-  
-        protected override void OnFormClosed(FormClosedEventArgs e)  
-        {  
-            renderTimer?.Dispose();  
-            originalPhoto?.Dispose();  
-            borderLayer?.Dispose();  
-            photoStream?.Dispose();  
-            borderStream?.Dispose();  
-            base.OnFormClosed(e);  
-        }  
-    }  
-
-    // ========================================================================  
-    // 1.5-SECOND TWO-STAGE SPLASH SCREEN ANIMATOR (0.75s PER PNG, 20ms FADE)  
-    // ========================================================================  
-    public class SplashForm : Form
-    {
-        private Bitmap? stage1Image;
-        private Bitmap? stage2Image;
-        private Bitmap? canvasBitmap;
-        private System.Windows.Forms.Timer animTimer;
-        private Stopwatch stopwatch = new Stopwatch();
-
-        private const int StageDurationMs = 750;  // 0.75 seconds per PNG
-        private const int TotalDurationMs = 1500; // 1.5 seconds total
-        private const int FadeDurationMs = 20;    // 20ms fast fade in/out
-
-        public SplashForm()
-        {
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.StartPosition = FormStartPosition.CenterScreen;
-            this.Size = new Size(960, 540); 
-            this.TopMost = true;
-
-            canvasBitmap = new Bitmap(this.Width, this.Height, PixelFormat.Format32bppArgb);
-
-            try
-            {
-                var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-                using (var s1 = assembly.GetManifestResourceStream("LabTools.splash_stage1.png"))
-                {
-                    if (s1 != null) stage1Image = new Bitmap(s1);
-                }
-
-                using (var s2 = assembly.GetManifestResourceStream("LabTools.splash_stage2.png"))
-                {
-                    if (s2 != null) stage2Image = new Bitmap(s2);
-                }
-            }
-            catch { }
-
-            animTimer = new System.Windows.Forms.Timer { Interval = 10 };
-            animTimer.Tick += AnimTimer_Tick;
-        }
-
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ExStyle |= 0x00080000; // WS_EX_LAYERED for per-pixel desktop alpha blending
-                return cp;
-            }
-        }
-
-        private void CloseSplash()
-        {
-            animTimer?.Stop();
-            stopwatch.Stop();
-            this.DialogResult = DialogResult.OK;
-            this.Close();
-        }
-
-        protected override void OnShown(EventArgs e)
-        {
-            base.OnShown(e);
-            stopwatch.Start();
-            RenderLayeredWindow();
-            animTimer.Start();
-        }
-
-        private void AnimTimer_Tick(object? sender, EventArgs e)
-        {
-            if (stopwatch.ElapsedMilliseconds >= TotalDurationMs)
-            {
-                CloseSplash();
-                return;
-            }
-            RenderLayeredWindow();
-        }
-
-        private void RenderLayeredWindow()
-        {
-            if (canvasBitmap == null) return;
-
-            long elapsed = stopwatch.ElapsedMilliseconds;
-            float alpha1 = 0f;
-            float alpha2 = 0f;
-
-            if (elapsed < StageDurationMs)
-            {
-                if (elapsed < FadeDurationMs)
-                    alpha1 = (float)elapsed / FadeDurationMs;
-                else if (elapsed < (StageDurationMs - FadeDurationMs))
-                    alpha1 = 1f;
-                else
-                    alpha1 = Math.Max(0f, 1f - ((float)(elapsed - (StageDurationMs - FadeDurationMs)) / FadeDurationMs));
-            }
-            else if (elapsed < TotalDurationMs)
-            {
-                long t2 = elapsed - StageDurationMs;
-                if (t2 < FadeDurationMs)
-                    alpha2 = (float)t2 / FadeDurationMs;
-                else if (t2 < (StageDurationMs - FadeDurationMs))
-                    alpha2 = 1f;
-                else
-                    alpha2 = Math.Max(0f, 1f - ((float)(t2 - (StageDurationMs - FadeDurationMs)) / FadeDurationMs));
-            }
-
-            using (Graphics g = Graphics.FromImage(canvasBitmap))
-            {
-                g.Clear(Color.FromArgb(0, 0, 0, 0));
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.CompositingQuality = CompositingQuality.HighQuality;
-
-                if (stage1Image != null && alpha1 > 0.001f)
-                {
-                    DrawCenteredImage(g, stage1Image, alpha1);
-                }
-                else if (stage2Image != null && alpha2 > 0.001f)
-                {
-                    DrawCenteredImage(g, stage2Image, alpha2);
-                }
-            }
-
-            SetBitmap(canvasBitmap);
-        }
-
-        private void DrawCenteredImage(Graphics g, Bitmap bmp, float opacity)
-        {
-            using (var attributes = new ImageAttributes())
-            {
-                var matrix = new ColorMatrix { Matrix33 = Math.Max(0f, Math.Min(1f, opacity)) };
-                attributes.SetColorMatrix(matrix, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
-                Rectangle destRect = new Rectangle(0, 0, this.Width, this.Height);
-                g.DrawImage(bmp, destRect, 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, attributes);
-            }
-        }
-
-        protected override void OnPaintBackground(PaintEventArgs e) { }
-
-        private void SetBitmap(Bitmap bitmap)
-        {
-            IntPtr screenDc = GetDC(IntPtr.Zero);
-            IntPtr memDc = CreateCompatibleDC(screenDc);
-            IntPtr hBitmap = IntPtr.Zero;
-            IntPtr oldBitmap = IntPtr.Zero;
-
-            try
-            {
-                hBitmap = bitmap.GetHbitmap(Color.FromArgb(0));
-                oldBitmap = SelectObject(memDc, hBitmap);
-
-                Size size = new Size(bitmap.Width, bitmap.Height);
-                Point pointSource = new Point(0, 0);
-                Point topPos = new Point(Left, Top);
-                BLENDFUNCTION blend = new BLENDFUNCTION { BlendOp = 0, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = 1 };
-
-                UpdateLayeredWindow(this.Handle, screenDc, ref topPos, ref size, memDc, ref pointSource, 0, ref blend, 2);
-            }
-            finally
-            {
-                ReleaseDC(IntPtr.Zero, screenDc);
-                if (hBitmap != IntPtr.Zero)
-                {
-                    SelectObject(memDc, oldBitmap);
-                    DeleteObject(hBitmap);
-                }
-                DeleteDC(memDc);
-            }
-        }
-
-        [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        private struct BLENDFUNCTION { public byte BlendOp; public byte BlendFlags; public byte SourceConstantAlpha; public byte AlphaFormat; }
-
-        [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref Point pptDst, ref Size psize, IntPtr hdcSrc, ref Point pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
-        [DllImport("user32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern IntPtr GetDC(IntPtr hWnd);
-        [DllImport("user32.dll", ExactSpelling = true)]
-        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern IntPtr CreateCompatibleDC(IntPtr hDC);
-        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern bool DeleteDC(IntPtr hdc);
-        [DllImport("gdi32.dll", ExactSpelling = true)]
-        private static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
-        [DllImport("gdi32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern bool DeleteObject(IntPtr hObject);
-
-        protected override void OnFormClosed(FormClosedEventArgs e)
-        {
-            animTimer?.Dispose();
-            stage1Image?.Dispose();
-            stage2Image?.Dispose();
-            canvasBitmap?.Dispose();
-            base.OnFormClosed(e);
         }
     }
 }
