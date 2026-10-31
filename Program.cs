@@ -18,7 +18,7 @@ using System.Runtime.InteropServices;
 using System.Diagnostics;
 using System.Globalization;
   
-namespace LabTools  
+namespace LabTools v3.6  
 {  
     static class Program  
     {  
@@ -136,7 +136,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools v3.1";  
+        public const string AppTitle = "LabTools v3.6";  
   
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
         private static readonly Regex CabinSearchRegex = new Regex(@"^\d{4,5}$", RegexOptions.Compiled);  
