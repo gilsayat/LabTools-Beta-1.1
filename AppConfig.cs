@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Collections.Generic;
 using Microsoft.Win32;
 
-namespace LabTools
+namespace LabTools v3.6
 {
     public class MediaSizeRule
     {
