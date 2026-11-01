@@ -12,7 +12,6 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 
 // ========================================================================
 // labtools - Laboratory Workflow Automation System
@@ -29,48 +28,6 @@ namespace LabTools
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.Run(new MainForm());
-        }
-    }
-
-    public class AppConfig
-    {
-        public string PrintedFolder { get; set; } = @"Z:\Printed";
-        public string OrdersFolder { get; set; } = @"Z:\PixelsOrder\Processed";
-        public string DownloadsFolder { get; set; } = @"Z:\PixelsOrder\Downloads";
-        public string PrintshopFolder { get; set; } = @"Z:\PhotoLab\Printshop";
-        public string CCFolder { get; set; } = @"Z:\CC";
-        public string DestinationForWhiteImages { get; set; } = @"Z:\PhotoLab\Misc";
-        public string MachineA { get; set; } = @"Z:\HotFolders\MachineA";
-        public string MachineB { get; set; } = @"Z:\HotFolders\MachineB";
-        public string MachineC { get; set; } = @"Z:\HotFolders\MachineC";
-        public string MachineD { get; set; } = @"Z:\HotFolders\MachineD";
-        public bool IsDarkMode { get; set; } = true;
-
-        private static readonly string ConfigFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "labtools_config.json");
-
-        public static AppConfig Load()
-        {
-            try
-            {
-                if (File.Exists(ConfigFilePath))
-                {
-                    string json = File.ReadAllText(ConfigFilePath);
-                    var loaded = JsonSerializer.Deserialize<AppConfig>(json);
-                    if (loaded != null) return loaded;
-                }
-            }
-            catch { }
-            return new AppConfig();
-        }
-
-        public void Save()
-        {
-            try
-            {
-                string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(ConfigFilePath, json);
-            }
-            catch { }
         }
     }
 
@@ -152,7 +109,7 @@ namespace LabTools
         public MainForm()
         {
             config = AppConfig.Load();
-            isDarkMode = config.IsDarkMode;
+            isDarkMode = true;
             InitializeCustomComponent();
             ApplyTheme();
             SetupFolderWatcher();
@@ -403,8 +360,6 @@ namespace LabTools
         private void ToggleTheme()
         {
             isDarkMode = !isDarkMode;
-            config.IsDarkMode = isDarkMode;
-            config.Save();
             ApplyTheme();
         }
 
