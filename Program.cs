@@ -42,7 +42,14 @@ namespace LabTools
         {  
             // Enforce single-instance execution policy via Windows Mutex
             bool createdNew;
-            singleInstanceMutex = new Mutex(true, "LabTools_Beta_SingleInstance_Mutex_GilSayat", out createdNew);
+            try
+            {
+                singleInstanceMutex = new Mutex(true, "LabTools_Beta_SingleInstance_Mutex_GilSayat", out createdNew);
+            }
+            catch (AbandonedMutexException)
+            {
+                createdNew = true;
+            }
             if (!createdNew)
             {
                 try
@@ -166,8 +173,18 @@ namespace LabTools
         private Color panelBackground => IsDarkMode ? Color.FromArgb(50, 52, 58) : Color.FromArgb(255, 255, 255);  
         private Color secondaryBackground => IsDarkMode ? Color.FromArgb(62, 65, 72) : Color.FromArgb(232, 234, 240);
         private Color cardBorderColor => IsDarkMode ? Color.FromArgb(82, 86, 94) : Color.FromArgb(206, 210, 218);
-        private Color accentBlue => Color.FromArgb(24, 132, 247);  
-        private Color accentTeal => Color.FromArgb(18, 142, 130);  
+        private static readonly ImageCodecInfo? JpegEncoder = ImageCodecInfo.GetImageDecoders()
+            .FirstOrDefault(c => c.FormatID == ImageFormat.Jpeg.Guid);
+
+        private static readonly Font RowTitleFont = new Font("Segoe UI", 8.75f, FontStyle.Bold);
+        private static readonly Font RowSubFont = new Font("Segoe UI", 8f, FontStyle.Regular);
+        private static readonly Font RowBadgeFont = new Font("Segoe UI", 7.75f, FontStyle.Bold);
+
+        private Color secondaryHover => IsDarkMode ? Color.FromArgb(74, 78, 86) : Color.FromArgb(218, 222, 230);
+        private Color accentBlue => Color.FromArgb(24, 132, 247);
+        private Color accentBlueHover => Color.FromArgb(46, 148, 255);
+        private Color accentTeal => Color.FromArgb(16, 152, 136);
+        private Color accentTealHover => Color.FromArgb(22, 172, 154);
         private Color textPrimary => IsDarkMode ? Color.FromArgb(245, 246, 248) : Color.FromArgb(28, 30, 34);  
         private Color textSecondary => IsDarkMode ? Color.FromArgb(172, 176, 184) : Color.FromArgb(108, 112, 120);
         private Color textAccentHeader => IsDarkMode ? Color.FromArgb(115, 218, 255) : Color.FromArgb(0, 112, 168);
@@ -264,6 +281,7 @@ namespace LabTools
         private Label lblHubCanvasHeader = null!;
         private ListBox lstHubCanvasOrders = null!;
         private readonly Dictionary<string, Bitmap> hubThumbCache = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> hubThumbLoading = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         private Label lblCabinOrdersHeader = null!;
         private ListBox lstCabinOrders = null!;
@@ -272,6 +290,10 @@ namespace LabTools
         private FileSystemWatcher? printshopWatcher;  
         private FileSystemWatcher? hubCanvasWatcher;
         private FileSystemWatcher? masterSyncWatcher;
+        private System.Windows.Forms.Timer? watcherDebounceTimer;
+        private bool pendingPrintshopRefresh = false;
+        private bool pendingHubCanvasRefresh = false;
+        private bool pendingMasterSyncRefresh = false;
         private readonly object historyLock = new object();
         private string cachedHistoryVoyage = "";
         private List<HistoryRecord>? cachedHistoryRecords = null;
@@ -316,6 +338,88 @@ namespace LabTools
                 ReleaseCapture();
                 SendMessage(this.Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
             }
+        }
+
+        private static string SanitizePathToken(string? input, string fallback = "")
+        {
+            if (string.IsNullOrWhiteSpace(input)) return fallback;
+            char[] invalid = Path.GetInvalidFileNameChars();
+            var sb = new StringBuilder(input.Length);
+            foreach (char c in input.Trim())
+            {
+                if (Array.IndexOf(invalid, c) < 0 && c != '/' && c != '\\')
+                    sb.Append(c);
+            }
+            string cleaned = sb.ToString().Trim('.');
+            return string.IsNullOrEmpty(cleaned) ? fallback : cleaned;
+        }
+
+        private static void SaveJpegHighQuality(Image image, string path, long quality = 95L)
+        {
+            if (JpegEncoder == null)
+            {
+                image.Save(path, ImageFormat.Jpeg);
+                return;
+            }
+            using (var encoderParams = new EncoderParameters(1))
+            {
+                encoderParams.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, quality);
+                image.Save(path, JpegEncoder, encoderParams);
+            }
+        }
+
+        private void UpdateFilesCountBadge()
+        {
+            if (lblFilesFound == null || lstFiles == null) return;
+            int total = lstFiles.Items.Count;
+            int checkedCount = lstFiles.CheckedItems.Count;
+            lblFilesFound.Text = total == 0
+                ? "0\nFiles Found"
+                : $"{checkedCount} Checked\n{total} Found";
+        }
+
+        private void ScheduleWatcherRefresh(bool printshop = false, bool hubCanvas = false, bool masterSync = false)
+        {
+            if (IsDisposed || !IsHandleCreated) return;
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed) return;
+                    if (printshop) pendingPrintshopRefresh = true;
+                    if (hubCanvas) pendingHubCanvasRefresh = true;
+                    if (masterSync) pendingMasterSyncRefresh = true;
+
+                    if (watcherDebounceTimer == null)
+                    {
+                        watcherDebounceTimer = new System.Windows.Forms.Timer { Interval = 200 };
+                        watcherDebounceTimer.Tick += (s, e) =>
+                        {
+                            watcherDebounceTimer.Stop();
+                            if (IsDisposed) return;
+
+                            if (pendingMasterSyncRefresh)
+                            {
+                                pendingMasterSyncRefresh = false;
+                                HandleMasterSyncChanged();
+                            }
+                            if (pendingPrintshopRefresh)
+                            {
+                                pendingPrintshopRefresh = false;
+                                UpdateNextCanvasNumber();
+                            }
+                            if (pendingHubCanvasRefresh)
+                            {
+                                pendingHubCanvasRefresh = false;
+                                RefreshHubCanvasOrdersList();
+                            }
+                        };
+                    }
+                    watcherDebounceTimer.Stop();
+                    watcherDebounceTimer.Start();
+                }));
+            }
+            catch { }
         }
   
         // ========================================================================  
@@ -569,7 +673,7 @@ namespace LabTools
   
         private void SetNetworkVoyage(string voyage)  
         {  
-            string cleanVoyage = voyage.Trim().ToUpperInvariant();
+            string cleanVoyage = SanitizePathToken(voyage, "PO101126").ToUpperInvariant();
             config.CurrentVoyage = cleanVoyage;  
             config.Save(syncAllFoldersAcrossPcs: false);  
             lock (historyLock)
@@ -671,77 +775,70 @@ namespace LabTools
                         NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.Attributes
                     };
 
-                    FileSystemEventHandler onSyncChanged = (s, e) =>
-                    {
-                        if (!IsDisposed && IsHandleCreated)
-                        {
-                            try
-                            {
-                                BeginInvoke(new Action(() =>
-                                {
-                                    long prevFolderSyncVersion = config.FolderSyncVersion;
-                                    string prevVoyage = config.CurrentVoyage;
-                                    var latest = AppConfig.Load();
-
-                                    // Always live-sync Voyage, LastOrderId, MediaSizes, and CustomTemplates
-                                    config.CurrentVoyage = latest.CurrentVoyage;
-                                    if (latest.LastOrderId > config.LastOrderId)
-                                        config.LastOrderId = latest.LastOrderId;
-                                    config.MediaSizes = latest.MediaSizes;
-                                    config.MediaSizeRules = latest.MediaSizeRules;
-                                    config.CustomTemplates = latest.CustomTemplates;
-
-                                    if (!prevVoyage.Equals(config.CurrentVoyage, StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        lock (historyLock)
-                                        {
-                                            cachedHistoryVoyage = "";
-                                            cachedHistoryRecords = null;
-                                        }
-                                    }
-
-                                    // Only sync folder paths if another PC explicitly pressed the Sync button in Settings
-                                    if (latest.FolderSyncVersion > prevFolderSyncVersion)
-                                    {
-                                        config.FolderSyncVersion = latest.FolderSyncVersion;
-                                        config.PrintedFolder = latest.PrintedFolder;
-                                        config.OrdersFolder = latest.OrdersFolder;
-                                        config.DownloadsFolder = latest.DownloadsFolder;
-                                        config.ToPrintFolder = latest.ToPrintFolder;
-                                        config.BorderedPrintsFolder = latest.BorderedPrintsFolder;
-                                        config.PrintshopFolder = latest.PrintshopFolder;
-                                        config.HubAppCanvasFolder = latest.HubAppCanvasFolder;
-                                        config.CopyrightFolder = latest.CopyrightFolder;
-                                        config.CCFolder = latest.CCFolder;
-                                        config.DestinationForWhiteImages = latest.DestinationForWhiteImages;
-                                        config.MachineA = latest.MachineA;
-                                        config.MachineB = latest.MachineB;
-                                        config.MachineC = latest.MachineC;
-                                        config.MachineD = latest.MachineD;
-
-                                        SetupFolderWatcher();
-                                        SetupPrintshopWatcher();
-                                        SetupHubCanvasWatcher();
-                                        RefreshHubCanvasOrdersList();
-                                        UpdateNextCanvasNumber();
-                                        CheckMachineHealthAsync();
-                                        CheckLatestDownloadOrder();
-                                        SetStatus("All folder paths synced from network master configuration.");
-                                    }
-
-                                    UpdateTitleBarCruiseDisplay();
-                                    LoadMediaSizes();
-                                    LoadCustomTemplates();
-                                }));
-                            }
-                            catch { }
-                        }
-                    };
-
+                    FileSystemEventHandler onSyncChanged = (s, e) => ScheduleWatcherRefresh(masterSync: true);
                     masterSyncWatcher.Changed += onSyncChanged;
                     masterSyncWatcher.Created += onSyncChanged;
                     masterSyncWatcher.EnableRaisingEvents = true;
                 }
+            }
+            catch { }
+        }
+
+        private void HandleMasterSyncChanged()
+        {
+            try
+            {
+                long prevFolderSyncVersion = config.FolderSyncVersion;
+                string prevVoyage = config.CurrentVoyage;
+                var latest = AppConfig.Load();
+
+                config.CurrentVoyage = latest.CurrentVoyage;
+                if (latest.LastOrderId > config.LastOrderId)
+                    config.LastOrderId = latest.LastOrderId;
+                config.MediaSizes = latest.MediaSizes;
+                config.MediaSizeRules = latest.MediaSizeRules;
+                config.CustomTemplates = latest.CustomTemplates;
+
+                if (!prevVoyage.Equals(config.CurrentVoyage, StringComparison.OrdinalIgnoreCase))
+                {
+                    lock (historyLock)
+                    {
+                        cachedHistoryVoyage = "";
+                        cachedHistoryRecords = null;
+                    }
+                }
+
+                if (latest.FolderSyncVersion > prevFolderSyncVersion)
+                {
+                    config.FolderSyncVersion = latest.FolderSyncVersion;
+                    config.PrintedFolder = latest.PrintedFolder;
+                    config.OrdersFolder = latest.OrdersFolder;
+                    config.DownloadsFolder = latest.DownloadsFolder;
+                    config.ToPrintFolder = latest.ToPrintFolder;
+                    config.BorderedPrintsFolder = latest.BorderedPrintsFolder;
+                    config.PrintshopFolder = latest.PrintshopFolder;
+                    config.HubAppCanvasFolder = latest.HubAppCanvasFolder;
+                    config.CopyrightFolder = latest.CopyrightFolder;
+                    config.CCFolder = latest.CCFolder;
+                    config.DestinationForWhiteImages = latest.DestinationForWhiteImages;
+                    config.MachineA = latest.MachineA;
+                    config.MachineB = latest.MachineB;
+                    config.MachineC = latest.MachineC;
+                    config.MachineD = latest.MachineD;
+
+                    SetupFolderWatcher();
+                    SetupPrintshopWatcher();
+                    SetupHubCanvasWatcher();
+                    RefreshHubCanvasOrdersList();
+                    UpdateNextCanvasNumber();
+                    CheckMachineHealthAsync();
+                    CheckLatestDownloadOrder();
+                    SetStatus("All folder paths synced from network master configuration.");
+                }
+
+                UpdateTitleBarCruiseDisplay();
+                LoadMediaSizes();
+                LoadCustomTemplates();
             }
             catch { }
         }  
@@ -918,11 +1015,11 @@ namespace LabTools
             };
             lblTitleBarCruise.MouseDown += DragForm_MouseDown;
 
-            btnMinWin = new Button() { Text = "—", Location = new Point(802, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), TabStop = false };
+            btnMinWin = new Button() { Text = "—", Location = new Point(848, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), TabStop = false };
             btnMinWin.FlatAppearance.BorderSize = 0;
             btnMinWin.Click += (s, e) => { this.WindowState = FormWindowState.Minimized; };
 
-            btnMaxWin = new Button() { Text = "☐", Location = new Point(848, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), Enabled = false, TabStop = false };
+            btnMaxWin = new Button() { Text = "☐", Location = new Point(802, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f), Enabled = false, Visible = false, TabStop = false };
             btnMaxWin.FlatAppearance.BorderSize = 0;
 
             btnCloseWin = new Button() { Text = "✕", Location = new Point(894, 0), Width = 46, Height = titleBarOffset, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.5f), TabStop = false };
@@ -961,7 +1058,7 @@ namespace LabTools
             btnHistory.Click += (s, e) => { OpenOrderHistoryDialog(); };  
 
             btnSettings = new Button() { Text = "Settings / Folders", Location = new Point(798, 8), Width = 128, Height = 30, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
-            btnSettings.FlatAppearance.BorderSize = 0;
+            btnSettings.FlatAppearance.BorderSize = 1;
             btnSettings.Click += (s, e) => { OpenSettingsDialog(); };  
               
             topBar.Controls.Add(themeSwitch);
@@ -993,11 +1090,11 @@ namespace LabTools
                 txtCabin.Clear(); txtCanvasCabin.Clear(); txtPrintCabinNum.Clear(); txtSeller.Clear();  
                 lstCabinOrders.Items.Clear(); cardCabinOrders.Title = "CABIN ORDERS (0)"; cardCabinOrders.Invalidate();
                 if (numPrintQty != null) numPrintQty.Value = 1;  
-                lblFilesFound.Text = "0\nFiles Found"; SetStatus("Cleared all search results, cabin numbers, seller, and order IDs.");   
+                UpdateFilesCountBadge(); SetStatus("Cleared all search results, cabin numbers, seller, and order IDs.");   
             };  
   
             btnOtherSource = new Button() { Text = "Select Other Source", Location = new Point(14, 70), Width = 180, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };  
-            btnOtherSource.FlatAppearance.BorderSize = 0;
+            btnOtherSource.FlatAppearance.BorderSize = 1;
             btnOtherSource.Click += (s, e) => { SelectFilesFromOtherSource(); };  
   
             btnExcelList = new Button() { Text = "Import CSV / Clipboard", Location = new Point(203, 70), Width = 180, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };  
@@ -1005,21 +1102,22 @@ namespace LabTools
             btnExcelList.Click += (s, e) => { ImportExcelOrClipboardList(); };  
 
             btnCheckOrderIds = new Button() { Text = "Check Order IDs", Location = new Point(392, 70), Width = 180, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.5f, FontStyle.Bold), Cursor = Cursors.Hand };
-            btnCheckOrderIds.FlatAppearance.BorderSize = 0;
+            btnCheckOrderIds.FlatAppearance.BorderSize = 1;
             btnCheckOrderIds.Click += (s, e) => { CheckOrderIdsForCabin(); };
   
             lstFiles = new CheckedListBox() { Location = new Point(14, 110), Width = 418, Height = 234, BorderStyle = BorderStyle.FixedSingle, Font = new Font("Segoe UI", 9.5f), AllowDrop = true, CheckOnClick = false };  
             lstFiles.SelectedIndexChanged += (s, e) => { PreviewSelectedImageSafe(); };  
+            lstFiles.ItemCheck += (s, e) => { if (IsHandleCreated) BeginInvoke(new Action(UpdateFilesCountBadge)); };
             lstFiles.DragEnter += HandleFileDragEnter;
             lstFiles.DragDrop += HandleFileDragDrop;
               
             btnSelectAll = new Button() { Text = "Select All", Location = new Point(442, 110), Width = 130, Height = 34, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnSelectAll.FlatAppearance.BorderSize = 1;
-            btnSelectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, true); lstFiles.EndUpdate(); };  
+            btnSelectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, true); lstFiles.EndUpdate(); UpdateFilesCountBadge(); };  
   
             btnUnselectAll = new Button() { Text = "Unselect All", Location = new Point(442, 152), Width = 130, Height = 34, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnUnselectAll.FlatAppearance.BorderSize = 1;
-            btnUnselectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, false); lstFiles.EndUpdate(); };  
+            btnUnselectAll.Click += (s, e) => { lstFiles.BeginUpdate(); for (int i = 0; i < lstFiles.Items.Count; i++) lstFiles.SetItemChecked(i, false); lstFiles.EndUpdate(); UpdateFilesCountBadge(); };  
 
             badgeFilesCount = new RoundedCardPanel() { Location = new Point(442, 196), Size = new Size(130, 82), CornerRadius = 10 };
             lblFilesFound = new Label() { Text = "0\nFiles Found", Location = new Point(4, 12), Width = 122, Height = 58, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) };  
@@ -1047,8 +1145,8 @@ namespace LabTools
             // ========================================================================
             cardPrint = new RoundedCardPanel() { Location = new Point(14, 466), Size = new Size(586, 148), Title = "PRINT DISPATCH" };
 
-            lblMachine = new Label() { Text = "Machine:", Location = new Point(14, 34), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            cmbMachine = new ComboBox() { Location = new Point(78, 31), Width = 140, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
+            lblMachine = new Label() { Text = "Machine:", Location = new Point(14, 32), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            cmbMachine = new ComboBox() { Location = new Point(78, 29), Width = 140, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
             cmbMachine.Items.AddRange(new string[] { "Machine A", "Machine B", "Machine C", "Machine D" });  
             cmbMachine.SelectedIndex = 2;  
             cmbMachine.SelectedIndexChanged += (s, e) => {
@@ -1060,29 +1158,27 @@ namespace LabTools
                 CheckMachineHealthAsync();
             };  
   
-            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(226, 34), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
+            lblMachineStatus = new Label() { Text = "● Checking...", Location = new Point(226, 32), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };  
 
-            lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(62, 62), Width = 86, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-            SetPlaceholder(txtPrintCabinNum, "cabin");  
+            lblPrintCabinLabel = new Label() { Text = "Cabin:", Location = new Point(14, 61), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            txtPrintCabinNum = new TextBox() { Text = "", Location = new Point(62, 58), Width = 86, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            SetPlaceholder(txtPrintCabinNum, "e.g. 7204");  
   
-            lblPrintQty = new Label() { Text = "Qty:", Location = new Point(158, 65), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
-            numPrintQty = new NumericUpDown() { Location = new Point(192, 62), Width = 52, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
+            lblPrintQty = new Label() { Text = "Qty:", Location = new Point(158, 61), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            numPrintQty = new NumericUpDown() { Location = new Point(192, 58), Width = 52, Height = 25, Minimum = 1, Maximum = 99, Value = 1, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
 
-            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(258, 63), Width = 88, Height = 24, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
+            chkAuto4W = new CheckBox() { Text = "Auto 4W", Location = new Point(258, 59), Width = 88, Height = 24, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
   
-            lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(14, 95), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
-            cmbPrintSizeInput = new ComboBox() { Location = new Point(62, 92), Width = 286, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
+            lblPrintSizeTag = new Label() { Text = "Size:", Location = new Point(14, 90), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+            cmbPrintSizeInput = new ComboBox() { Location = new Point(62, 87), Width = 286, Height = 25, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 9f) };  
   
-            lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(14, 122), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Visible = false };
-            cmbOrderType = new ComboBox() { Location = new Point(62, 118), Width = 286, Height = 24, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 8.75f) };  
+            lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(14, 117), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Visible = true };
+            cmbOrderType = new ComboBox() { Location = new Point(62, 114), Width = 286, Height = 24, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 8.75f) };  
             cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
             cmbOrderType.Text = "Package";  
-            lblOrderTypeTag.Location = new Point(14, 121);
-            lblOrderTypeTag.Visible = true;
   
             // MASSIVE FULL-CARD-HEIGHT PRINT BUTTON ON THE RIGHT
-            btnPrint = new Button() { Text = "PRINT", Location = new Point(362, 31), Width = 210, Height = 106, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Cursor = Cursors.Hand };  
+            btnPrint = new Button() { Text = "PRINT", Location = new Point(362, 29), Width = 210, Height = 109, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 15f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnPrint.FlatAppearance.BorderSize = 0;
             btnPrint.Click += (s, e) => { ExecutePrintJobAsync(); };  
 
@@ -1120,7 +1216,7 @@ namespace LabTools
 
             lblUsbCabin = new Label() { Text = "Cabin:", Location = new Point(118, 36), AutoSize = true, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };  
             txtCabin = new TextBox() { Text = "", Location = new Point(166, 33), Width = 110, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
-            SetPlaceholder(txtCabin, "cabin");  
+            SetPlaceholder(txtCabin, "e.g. 7204");  
   
             btnCopyUsb = new Button() { Text = "Copy To USB", Location = new Point(292, 30), Width = 136, Height = 32, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Cursor = Cursors.Hand };  
             btnCopyUsb.FlatAppearance.BorderSize = 0;
@@ -1138,7 +1234,7 @@ namespace LabTools
 
             lblCanvasCabinTag = new Label() { Text = "Cabin:", Location = new Point(188, 84), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
             txtCanvasCabin = new TextBox() { Text = "", Location = new Point(236, 81), Width = 112, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };   
-            SetPlaceholder(txtCanvasCabin, "cabin");  
+            SetPlaceholder(txtCanvasCabin, "e.g. 7204");  
 
             lblCanvasSizeTag = new Label() { Text = "Size:", Location = new Point(14, 116), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
             cmbCanvasSize = new ComboBox() { Location = new Point(52, 113), Width = 122, Height = 25, DropDownStyle = ComboBoxStyle.DropDownList, Font = new Font("Segoe UI", 9f) };  
@@ -1147,7 +1243,7 @@ namespace LabTools
 
             lblCanvasSellerTag = new Label() { Text = "Seller:", Location = new Point(188, 116), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold) };
             txtSeller = new TextBox() { Text = "", Location = new Point(236, 113), Width = 112, Height = 25, TextAlign = HorizontalAlignment.Center, Font = new Font("Segoe UI", 9.5f) };  
-            SetPlaceholder(txtSeller, "seller");  
+            SetPlaceholder(txtSeller, "ID / Name");  
   
             // Post Canvas Button matched cleanly to the compact utility style
             btnPostCanvas = new Button() { Text = "Post Canvas Order", Location = new Point(362, 81), Width = 210, Height = 58, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9.75f, FontStyle.Bold), Cursor = Cursors.Hand };  
@@ -1195,7 +1291,17 @@ namespace LabTools
             // R3: CABIN ORDERS CARD (MOVED UP! Y=420, Height=174)
             cardCabinOrders = new RoundedCardPanel() { Location = new Point(612, 420), Size = new Size(314, 174), Title = "CABIN ORDERS (0)" };
             lblCabinOrdersHeader = new Label() { Visible = false };
-            lstCabinOrders = new ListBox() { Location = new Point(12, 30), Width = 290, Height = 132, Font = new Font("Segoe UI", 9f), BorderStyle = BorderStyle.FixedSingle };
+            lstCabinOrders = new ListBox()
+            {
+                Location = new Point(12, 30),
+                Width = 290,
+                Height = 132,
+                Font = new Font("Segoe UI", 9f),
+                BorderStyle = BorderStyle.FixedSingle,
+                DrawMode = DrawMode.OwnerDrawFixed,
+                ItemHeight = 26
+            };
+            lstCabinOrders.DrawItem += LstCabinOrders_DrawItem;
             lstCabinOrders.SelectedIndexChanged += (s, e) => {
                 if (lstCabinOrders.SelectedItem is CabinOrderInfo order)
                 {
@@ -1228,7 +1334,7 @@ namespace LabTools
                 Font = new Font("Segoe UI", 8.5f),
                 BorderStyle = BorderStyle.FixedSingle,
                 DrawMode = DrawMode.OwnerDrawFixed,
-                ItemHeight = 36
+                ItemHeight = 38
             };
             lstHubCanvasOrders.DrawItem += LstHubCanvasOrders_DrawItem;
             lstHubCanvasOrders.SelectedIndexChanged += (s, e) =>
@@ -1283,12 +1389,13 @@ namespace LabTools
             topBar.BackColor = navBarBg;
             lblTitle.ForeColor = textPrimary;
 
-            btnHistory.BackColor = secondaryBackground;
-            btnHistory.ForeColor = textPrimary;
-            btnHistory.FlatAppearance.BorderColor = cardBorderColor;
-
-            btnSettings.BackColor = accentTeal;
-            btnSettings.ForeColor = Color.White;
+            foreach (var navBtn in new[] { btnHistory, btnSettings })
+            {
+                navBtn.BackColor = secondaryBackground;
+                navBtn.ForeColor = textPrimary;
+                navBtn.FlatAppearance.BorderColor = cardBorderColor;
+                navBtn.FlatAppearance.MouseOverBackColor = secondaryHover;
+            }
 
             // Cards
             foreach (var card in new[] { cardSearch, cardPrint, cardTransferCanvas, cardPreview, cardMonitor, cardCabinOrders, cardHubCanvas })
@@ -1350,28 +1457,36 @@ namespace LabTools
             if (lblLastOrder.Text.StartsWith("Waiting"))
                 lblLastOrder.ForeColor = textSecondary;
 
-            // Buttons
+            lstCabinOrders.Invalidate();
+
+            // Semantic Button Hierarchy
             btnFind.BackColor = accentBlue;
             btnFind.ForeColor = Color.White;
+            btnFind.FlatAppearance.MouseOverBackColor = accentBlueHover;
+
             btnCancelSearch.BackColor = Color.FromArgb(215, 58, 73);
             btnCancelSearch.ForeColor = Color.White;
 
-            foreach (var secBtn in new[] { btnClearAll, btnExcelList, btnSelectAll, btnUnselectAll })
+            foreach (var secBtn in new[] { btnClearAll, btnOtherSource, btnExcelList, btnCheckOrderIds, btnSelectAll, btnUnselectAll })
             {
                 secBtn.BackColor = secondaryBackground;
                 secBtn.ForeColor = textPrimary;
                 secBtn.FlatAppearance.BorderColor = cardBorderColor;
+                secBtn.FlatAppearance.MouseOverBackColor = secondaryHover;
             }
 
-            btnOtherSource.BackColor = accentTeal;
-            btnOtherSource.ForeColor = Color.White;
-            btnCheckOrderIds.BackColor = accentBlue;
-            btnCheckOrderIds.ForeColor = Color.White;
-
-            foreach (var actionBtn in new[] { btnCopyUsb, btnCopyDownloads, btnPostCanvas, btnPrint })
+            foreach (var transferBtn in new[] { btnCopyUsb, btnCopyDownloads })
             {
-                actionBtn.BackColor = accentTeal;
-                actionBtn.ForeColor = Color.White;
+                transferBtn.BackColor = accentBlue;
+                transferBtn.ForeColor = Color.White;
+                transferBtn.FlatAppearance.MouseOverBackColor = accentBlueHover;
+            }
+
+            foreach (var printActionBtn in new[] { btnPostCanvas, btnPrint })
+            {
+                printActionBtn.BackColor = accentTeal;
+                printActionBtn.ForeColor = Color.White;
+                printActionBtn.FlatAppearance.MouseOverBackColor = accentTealHover;
             }
 
             // Bottom Status Bar
@@ -1387,33 +1502,46 @@ namespace LabTools
             Color bg = IsDarkMode ? Color.FromArgb(38, 40, 44) : Color.FromArgb(240, 242, 246);
             Color secBg = IsDarkMode ? Color.FromArgb(56, 59, 66) : Color.FromArgb(255, 255, 255);
             Color fg = IsDarkMode ? Color.FromArgb(245, 246, 248) : Color.FromArgb(28, 30, 34);
+            Color mutedFg = IsDarkMode ? Color.FromArgb(172, 176, 184) : Color.FromArgb(108, 112, 120);
+            Color accentGreen = IsDarkMode ? Color.FromArgb(68, 220, 108) : Color.FromArgb(20, 135, 50);
+            Color accentCyan = IsDarkMode ? Color.FromArgb(130, 220, 210) : Color.FromArgb(0, 112, 168);
 
             dialog.BackColor = bg;
-            foreach (Control c in dialog.Controls)
+
+            void StyleControlsRecursive(Control parent)
             {
-                if (c is Label lbl)
+                foreach (Control c in parent.Controls)
                 {
-                    if (lbl.ForeColor == Color.White || lbl.ForeColor == Color.LightGray)
-                        lbl.ForeColor = fg;
-                }
-                else if (c is TextBox || c is ListBox || c is CheckedListBox || c is ListView || c is ComboBox)
-                {
-                    c.BackColor = secBg;
-                    c.ForeColor = fg;
-                }
-                else if (c is CheckBox || c is RadioButton)
-                {
-                    c.ForeColor = fg;
-                }
-                else if (c is Button btn)
-                {
-                    if (btn.BackColor == Color.FromArgb(54, 54, 54))
+                    if (c is Label lbl)
                     {
-                        btn.BackColor = secBg;
-                        btn.ForeColor = fg;
+                        if (lbl.ForeColor == Color.White) lbl.ForeColor = fg;
+                        else if (lbl.ForeColor == Color.LightGray) lbl.ForeColor = mutedFg;
+                        else if (lbl.ForeColor == Color.FromArgb(68, 220, 108)) lbl.ForeColor = accentGreen;
+                        else if (lbl.ForeColor == Color.FromArgb(130, 220, 210)) lbl.ForeColor = accentCyan;
                     }
+                    else if (c is TextBox || c is ListBox || c is CheckedListBox || c is ListView || c is ComboBox || c is NumericUpDown)
+                    {
+                        c.BackColor = secBg;
+                        c.ForeColor = fg;
+                    }
+                    else if (c is CheckBox || c is RadioButton)
+                    {
+                        c.ForeColor = fg;
+                    }
+                    else if (c is Button btn)
+                    {
+                        if (btn.BackColor == Color.FromArgb(54, 54, 54))
+                        {
+                            btn.BackColor = secBg;
+                            btn.ForeColor = fg;
+                        }
+                    }
+
+                    if (c.HasChildren) StyleControlsRecursive(c);
                 }
             }
+
+            StyleControlsRecursive(dialog);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -1433,31 +1561,19 @@ namespace LabTools
             try
             {
                 hubCanvasWatcher?.Dispose();
-                if (!string.IsNullOrWhiteSpace(config.HubAppCanvasFolder))
+                if (!string.IsNullOrWhiteSpace(config.HubAppCanvasFolder) && Directory.Exists(config.HubAppCanvasFolder))
                 {
-                    if (Directory.Exists(config.HubAppCanvasFolder))
+                    hubCanvasWatcher = new FileSystemWatcher(config.HubAppCanvasFolder)
                     {
-                        hubCanvasWatcher = new FileSystemWatcher(config.HubAppCanvasFolder)
-                        {
-                            IncludeSubdirectories = false,
-                            NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
-                        };
+                        IncludeSubdirectories = false,
+                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
+                    };
 
-                        FileSystemEventHandler onChange = (s, e) =>
-                        {
-                            if (!IsDisposed && IsHandleCreated)
-                                try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
-                        };
-
-                        hubCanvasWatcher.Created += onChange;
-                        hubCanvasWatcher.Deleted += onChange;
-                        hubCanvasWatcher.Renamed += (s, e) =>
-                        {
-                            if (!IsDisposed && IsHandleCreated)
-                                try { BeginInvoke(new Action(RefreshHubCanvasOrdersList)); } catch { }
-                        };
-                        hubCanvasWatcher.EnableRaisingEvents = true;
-                    }
+                    FileSystemEventHandler onChange = (s, e) => ScheduleWatcherRefresh(hubCanvas: true);
+                    hubCanvasWatcher.Created += onChange;
+                    hubCanvasWatcher.Deleted += onChange;
+                    hubCanvasWatcher.Renamed += (s, e) => ScheduleWatcherRefresh(hubCanvas: true);
+                    hubCanvasWatcher.EnableRaisingEvents = true;
                 }
             }
             catch { }
@@ -1549,28 +1665,104 @@ namespace LabTools
             if (hubThumbCache.TryGetValue(path, out Bitmap? cached) && cached != null)
                 return cached;
 
-            try
+            if (hubThumbLoading.Add(path))
             {
-                if (!File.Exists(path)) return null;
-                byte[] bytes = File.ReadAllBytes(path);
-                using (var ms = new MemoryStream(bytes))
-                using (var img = Image.FromStream(ms))
+                _ = Task.Run(() =>
                 {
-                    Bitmap thumb = new Bitmap(40, 30);
-                    using (Graphics g = Graphics.FromImage(thumb))
+                    Bitmap? generated = null;
+                    try
                     {
-                        g.Clear(Color.FromArgb(24, 25, 29));
-                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                        double r = Math.Min(40.0 / img.Width, 30.0 / img.Height);
-                        int w = Math.Max(1, (int)(img.Width * r));
-                        int h = Math.Max(1, (int)(img.Height * r));
-                        g.DrawImage(img, (40 - w) / 2, (30 - h) / 2, w, h);
+                        if (File.Exists(path))
+                        {
+                            byte[] bytes = File.ReadAllBytes(path);
+                            using (var ms = new MemoryStream(bytes))
+                            using (var img = Image.FromStream(ms))
+                            {
+                                Bitmap thumb = new Bitmap(40, 30);
+                                using (Graphics g = Graphics.FromImage(thumb))
+                                {
+                                    g.Clear(Color.FromArgb(24, 25, 29));
+                                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                    double r = Math.Min(40.0 / img.Width, 30.0 / img.Height);
+                                    int w = Math.Max(1, (int)(img.Width * r));
+                                    int h = Math.Max(1, (int)(img.Height * r));
+                                    g.DrawImage(img, (40 - w) / 2, (30 - h) / 2, w, h);
+                                }
+                                generated = thumb;
+                            }
+                        }
                     }
-                    hubThumbCache[path] = thumb;
-                    return thumb;
-                }
+                    catch { }
+
+                    if (!IsDisposed && IsHandleCreated)
+                    {
+                        try
+                        {
+                            BeginInvoke(new Action(() =>
+                            {
+                                hubThumbLoading.Remove(path);
+                                if (generated != null)
+                                {
+                                    if (hubThumbCache.TryGetValue(path, out Bitmap? old)) old?.Dispose();
+                                    hubThumbCache[path] = generated;
+                                    lstHubCanvasOrders?.Invalidate();
+                                }
+                            }));
+                        }
+                        catch
+                        {
+                            generated?.Dispose();
+                        }
+                    }
+                    else
+                    {
+                        generated?.Dispose();
+                    }
+                });
             }
-            catch { return null; }
+            return null;
+        }
+
+        private void LstCabinOrders_DrawItem(object? sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || e.Index >= lstCabinOrders.Items.Count) return;
+
+            bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+            Color bgColor = isSelected ? accentBlue : secondaryBackground;
+            Color primaryColor = isSelected ? Color.White : textPrimary;
+            Color badgeColor = isSelected ? Color.White : textAccentHeader;
+
+            using (Brush bgBrush = new SolidBrush(bgColor))
+            {
+                e.Graphics.FillRectangle(bgBrush, e.Bounds);
+            }
+
+            if (lstCabinOrders.Items[e.Index] is CabinOrderInfo order)
+            {
+                Rectangle leftRect = new Rectangle(e.Bounds.X + 8, e.Bounds.Y, 110, e.Bounds.Height);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    "#" + order.OrderId,
+                    RowTitleFont,
+                    leftRect,
+                    primaryColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPrefix
+                );
+
+                string sizePart = string.IsNullOrEmpty(order.PrintSize) ? "" : " • " + order.PrintSize;
+                string rightText = $"{order.FilePaths.Count} photo{(order.FilePaths.Count == 1 ? "" : "s")}{sizePart}";
+                Rectangle rightRect = new Rectangle(e.Bounds.X + 112, e.Bounds.Y, e.Bounds.Width - 120, e.Bounds.Height);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    rightText,
+                    RowBadgeFont,
+                    rightRect,
+                    badgeColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
+                );
+            }
+
+            e.DrawFocusRectangle();
         }
 
         private void LstHubCanvasOrders_DrawItem(object? sender, DrawItemEventArgs e)
@@ -1579,7 +1771,9 @@ namespace LabTools
 
             bool isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
             Color bgColor = isSelected ? accentBlue : secondaryBackground;
-            Color fgColor = isSelected ? Color.White : textPrimary;
+            Color titleColor = isSelected ? Color.White : textPrimary;
+            Color subColor = isSelected ? Color.FromArgb(225, 238, 255) : textSecondary;
+            Color sellerColor = isSelected ? Color.White : textAccentHeader;
 
             using (Brush bgBrush = new SolidBrush(bgColor))
             {
@@ -1589,22 +1783,51 @@ namespace LabTools
             if (lstHubCanvasOrders.Items[e.Index] is HubCanvasItem item)
             {
                 Bitmap? thumb = GetOrCreateHubThumbnail(item.FullPath);
-                int thumbX = e.Bounds.X + 4;
+                int thumbX = e.Bounds.X + 5;
                 int thumbY = e.Bounds.Y + (e.Bounds.Height - 30) / 2;
 
                 if (thumb != null)
                 {
                     e.Graphics.DrawImage(thumb, thumbX, thumbY, 40, 30);
-                    e.Graphics.DrawRectangle(Pens.DimGray, thumbX, thumbY, 40, 30);
                 }
+                else
+                {
+                    using (Brush phBrush = new SolidBrush(Color.FromArgb(28, 30, 34)))
+                        e.Graphics.FillRectangle(phBrush, thumbX, thumbY, 40, 30);
+                }
+                e.Graphics.DrawRectangle(Pens.DimGray, thumbX, thumbY, 40, 30);
 
-                Rectangle textRect = new Rectangle(e.Bounds.X + 50, e.Bounds.Y, e.Bounds.Width - 54, e.Bounds.Height);
+                string cabinLabel = string.IsNullOrWhiteSpace(item.Cabin) ? "Cabin ?" : $"Cabin {item.Cabin}";
+                string topLeftText = $"{cabinLabel} • {item.CanvasSize}";
+                string sellerBadge = $"[{item.Seller}]";
+
+                Rectangle topRect = new Rectangle(e.Bounds.X + 52, e.Bounds.Y + 3, e.Bounds.Width - 110, 17);
                 TextRenderer.DrawText(
                     e.Graphics,
-                    item.FileName,
-                    e.Font ?? this.Font,
-                    textRect,
-                    fgColor,
+                    topLeftText,
+                    RowTitleFont,
+                    topRect,
+                    titleColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
+                );
+
+                Rectangle badgeRect = new Rectangle(e.Bounds.Right - 58, e.Bounds.Y + 3, 52, 17);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    sellerBadge,
+                    RowBadgeFont,
+                    badgeRect,
+                    sellerColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
+                );
+
+                Rectangle bottomRect = new Rectangle(e.Bounds.X + 52, e.Bounds.Y + 19, e.Bounds.Width - 58, 16);
+                TextRenderer.DrawText(
+                    e.Graphics,
+                    item.PhotoName,
+                    RowSubFont,
+                    bottomRect,
+                    subColor,
                     TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix
                 );
             }
@@ -1625,10 +1848,10 @@ namespace LabTools
 
                 UpdateNextCanvasNumber();
                 string numPrefix = nextCanvasNumber.ToString("D3");
-                string cabin = string.IsNullOrWhiteSpace(item.Cabin) ? txtCanvasCabin.Text.Trim() : item.Cabin;
-                string size = string.IsNullOrWhiteSpace(item.CanvasSize) ? "16x20" : item.CanvasSize;
-                string seller = string.IsNullOrWhiteSpace(item.Seller) ? "APP" : item.Seller;
-                string photoName = string.IsNullOrWhiteSpace(item.PhotoName) ? Path.GetFileNameWithoutExtension(item.FileName) : item.PhotoName;
+                string cabin = SanitizePathToken(string.IsNullOrWhiteSpace(item.Cabin) ? txtCanvasCabin.Text : item.Cabin);
+                string size = SanitizePathToken(item.CanvasSize, "16x20");
+                string seller = SanitizePathToken(item.Seller, "APP");
+                string photoName = SanitizePathToken(item.PhotoName, Path.GetFileNameWithoutExtension(item.FileName));
 
                 if (!string.IsNullOrEmpty(cabin)) txtCabin.Text = cabin;
                 if (!cmbCanvasSize.Items.Contains(size)) cmbCanvasSize.Items.Add(size);
@@ -1728,7 +1951,7 @@ namespace LabTools
                     await Task.Run(() =>
                     {
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());
-                        File.Move(tempFilePath, finalFilePath);
+                        File.Move(tempFilePath, finalFilePath, overwrite: true);
                     });
 
                     AutoCopyPrintedPhotosForHybridShip(cabin, new List<string> { doneFilePath });
@@ -2013,7 +2236,7 @@ namespace LabTools
 
             numPrintQty.Value = 1;
 
-            lblFilesFound.Text = lstFiles.Items.Count + "\nFiles Total";
+            UpdateFilesCountBadge();
             SetStatus($"Imported {addedCount} photo(s) from Order {order.OrderId} for Cabin {order.Cabin}.");
 
             if (lstFiles.Items.Count > 0)
@@ -2088,7 +2311,7 @@ namespace LabTools
                 txtCabin.Text = detectedCabin;
             }
 
-            lblFilesFound.Text = lstFiles.Items.Count + "\nFiles Total";
+            UpdateFilesCountBadge();
             SetStatus("Added " + addedCount + " photo(s) via drag-and-drop.");
 
             if (lstFiles.Items.Count > 0)
@@ -2124,7 +2347,7 @@ namespace LabTools
                     }  
                     lstFiles.EndUpdate();  
   
-                    lblFilesFound.Text = lstFiles.Items.Count + "\nFiles Total";  
+                    UpdateFilesCountBadge();  
                     SetStatus("Added " + addedCount + " image(s) from other source. Selected for print.");  
   
                     if (lstFiles.Items.Count > 0)  
@@ -2464,7 +2687,7 @@ namespace LabTools
                 lstFiles.EndUpdate();  
   
                 if (!string.IsNullOrEmpty(searchResult.Cabin)) txtCabin.Text = searchResult.Cabin;  
-                lblFilesFound.Text = count + "\nFiles Found";  
+                UpdateFilesCountBadge();  
   
                 if (searchResult.IsOrder)  
                 {  
@@ -2718,7 +2941,7 @@ namespace LabTools
                 }  
                 lstFiles.EndUpdate();  
   
-                lblFilesFound.Text = count + "\nFiles Found";  
+                UpdateFilesCountBadge();  
                 SetStatus("Imported " + count + " file(s) successfully.");  
                 MessageBox.Show("Successfully resolved and imported " + count + " file reference(s).", "Import Complete", MessageBoxButtons.OK, MessageBoxIcon.Information);  
   
@@ -2795,11 +3018,12 @@ namespace LabTools
         private void AutoCopyPrintedPhotosForHybridShip(string cabinNum, IEnumerable<string> filePaths)
         {
             if (!config.HybridShip) return;
-            if (string.IsNullOrWhiteSpace(config.ToPrintFolder) || string.IsNullOrWhiteSpace(cabinNum)) return;
+            string safeCabin = SanitizePathToken(cabinNum);
+            if (string.IsNullOrWhiteSpace(config.ToPrintFolder) || string.IsNullOrWhiteSpace(safeCabin)) return;
 
             try
             {
-                string cabinDestDir = Path.Combine(config.ToPrintFolder, cabinNum.Trim());
+                string cabinDestDir = Path.Combine(config.ToPrintFolder, safeCabin);
                 Directory.CreateDirectory(cabinDestDir);
 
                 foreach (string srcPath in filePaths)
@@ -2816,13 +3040,16 @@ namespace LabTools
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                SetStatus("HybridShip copy warning: " + ex.Message);
+            }
         }
   
         // ========================================================================  
         // PRINT DISPATCH  
         // ========================================================================  
-        private void ExecutePrintJobAsync()  
+        private async void ExecutePrintJobAsync()  
         {  
             try  
             {  
@@ -2835,7 +3062,6 @@ namespace LabTools
                 else if (selectedMachine == "Machine D") machineTargetFolder = config.MachineD;  
   
                 if (string.IsNullOrWhiteSpace(machineTargetFolder)) throw new InvalidOperationException("The target folder for " + selectedMachine + " is not configured.");  
-                Directory.CreateDirectory(machineTargetFolder);  
   
                 var checkedItems = lstFiles.CheckedItems.Cast<object>().OfType<FileItem>().ToList();  
                 if (checkedItems.Count == 0) { MessageBox.Show("Please check at least one file in the list to print.", "No Files Selected", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }  
@@ -2862,7 +3088,7 @@ namespace LabTools
                 string orderType = cmbOrderType.Text.Trim();  
                 if (string.IsNullOrEmpty(orderType)) orderType = "Package";  
   
-                string cabinNum = txtPrintCabinNum.Text.Trim();  
+                string cabinNum = SanitizePathToken(txtPrintCabinNum.Text);  
                 if (string.IsNullOrWhiteSpace(cabinNum)) { MessageBox.Show("Enter a cabin number before printing.", "Missing Cabin Number", MessageBoxButtons.OK, MessageBoxIcon.Warning); txtPrintCabinNum.Focus(); return; }  
 
                 List<string> originalPathsToCopy = checkedItems.Select(x => x.FullPath).ToList();
@@ -2903,6 +3129,7 @@ namespace LabTools
   
                     var finalFilesToPrint = new List<FileItem>();  
                     string prefix = isCustomTemplate ? "CUSTOM_" : (isMiniPortHole ? "MINIPORTHOLE_" : "PORTHOLE_");  
+                    var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
   
                     foreach (var item in checkedItems)  
                     {  
@@ -2910,9 +3137,19 @@ namespace LabTools
                         {  
                             if (adjustForm.ShowDialog(this) == DialogResult.OK && adjustForm.FlattenedImage != null)  
                             {  
-                                string destPath = Path.Combine(tempBorderDir, prefix + Path.GetFileName(item.FullPath));  
-                                adjustForm.FlattenedImage.Save(destPath, ImageFormat.Jpeg);  
-                                finalFilesToPrint.Add(new FileItem { FileName = Path.GetFileName(destPath), FullPath = destPath });  
+                                using (Image flattened = adjustForm.FlattenedImage)
+                                {
+                                    string baseFile = Path.GetFileNameWithoutExtension(item.FullPath);
+                                    string candidateName = $"{prefix}{baseFile}.jpg";
+                                    int dupIndex = 2;
+                                    while (!usedNames.Add(candidateName))
+                                    {
+                                        candidateName = $"{prefix}{baseFile}_{dupIndex++}.jpg";
+                                    }
+                                    string destPath = Path.Combine(tempBorderDir, candidateName);  
+                                    SaveJpegHighQuality(flattened, destPath, 95L);  
+                                    finalFilesToPrint.Add(new FileItem { FileName = Path.GetFileName(destPath), FullPath = destPath });  
+                                }
                             }  
                             else  
                             {  
@@ -2942,13 +3179,20 @@ namespace LabTools
                 {  
                     AppendPrintBlocksForItem(sb, printSize, qty, mediaType, item.FullPath, appendAuto4W, isFlattenedBorder);
                 }  
-  
-                string orderId = GetNext7CharOrderId();  
-                string tempFilePath = Path.Combine(machineTargetFolder, orderId + ".tmp");  
-                string finalFilePath = Path.Combine(machineTargetFolder, orderId + ".txt");  
-  
-                Program.SafeWriteAllText(tempFilePath, sb.ToString());  
-                File.Move(tempFilePath, finalFilePath);  
+
+                btnPrint.Enabled = false;
+                string ticketPayload = sb.ToString();
+                string orderId = await Task.Run(() =>
+                {
+                    Directory.CreateDirectory(machineTargetFolder);
+                    string id = GetNext7CharOrderId();
+                    string tempFilePath = Path.Combine(machineTargetFolder, id + ".tmp");
+                    string finalFilePath = Path.Combine(machineTargetFolder, id + ".txt");
+
+                    Program.SafeWriteAllText(tempFilePath, ticketPayload);
+                    File.Move(tempFilePath, finalFilePath, overwrite: true);
+                    return id;
+                });
 
                 string cabinCopy = cabinNum;
                 var pathsCopy = originalPathsToCopy.ToList();
@@ -2969,6 +3213,10 @@ namespace LabTools
             {  
                 MessageBox.Show("Print Error: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);  
             }  
+            finally
+            {
+                btnPrint.Enabled = true;
+            }
         }  
   
         // ========================================================================  
@@ -3127,10 +3375,10 @@ namespace LabTools
                         NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime  
                     };  
   
-                    FileSystemEventHandler onChange = (s, e) => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(new Action(() => UpdateNextCanvasNumber())); } catch { } };  
+                    FileSystemEventHandler onChange = (s, e) => ScheduleWatcherRefresh(printshop: true);  
                     printshopWatcher.Created += onChange;  
                     printshopWatcher.Deleted += onChange;  
-                    printshopWatcher.Renamed += (s, e) => { if (!IsDisposed && IsHandleCreated) try { BeginInvoke(new Action(() => UpdateNextCanvasNumber())); } catch { } };  
+                    printshopWatcher.Renamed += (s, e) => ScheduleWatcherRefresh(printshop: true);  
                     printshopWatcher.EnableRaisingEvents = true;  
                 }  
             }  
@@ -3180,10 +3428,11 @@ namespace LabTools
             try  
             {  
                 string targetDir = config.PrintshopFolder;  
-                if (!Directory.Exists(targetDir)) { lblCanvasHeader.Text = "Next Canvas No. 001"; nextCanvasNumber = 1; return; }  
+                if (string.IsNullOrWhiteSpace(targetDir) || !Directory.Exists(targetDir)) { lblCanvasHeader.Text = "Next Canvas No. 001"; nextCanvasNumber = 1; return; }  
   
                 int highest = 0;  
-                var files = Directory.GetFiles(targetDir, "*.jpg", SearchOption.TopDirectoryOnly);  
+                var files = Directory.EnumerateFiles(targetDir, "*.*", SearchOption.TopDirectoryOnly)
+                                     .Where(f => ImageExtensions.Contains(Path.GetExtension(f)));  
                 foreach (string f in files)  
                 {  
                     string name = Path.GetFileNameWithoutExtension(f);  
@@ -3209,12 +3458,11 @@ namespace LabTools
                 var checkedItems = lstFiles.CheckedItems.Cast<object>().OfType<FileItem>().ToList();  
                 if (checkedItems.Count == 0) { MessageBox.Show("Please check at least one file for canvas printing.", "No Selection", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }  
   
-                string cabin = txtCanvasCabin.Text.Trim();  
+                string cabin = SanitizePathToken(txtCanvasCabin.Text);  
                 if (string.IsNullOrWhiteSpace(cabin)) { MessageBox.Show("Please enter a cabin number for canvas order.", "Missing Cabin", MessageBoxButtons.OK, MessageBoxIcon.Warning); txtCanvasCabin.Focus(); return; }  
   
-                string size = cmbCanvasSize.SelectedItem != null ? cmbCanvasSize.SelectedItem.ToString()! : "16x20";  
-                string seller = txtSeller.Text.Trim();  
-                if (string.IsNullOrEmpty(seller)) seller = "FREE";  
+                string size = SanitizePathToken(cmbCanvasSize.SelectedItem != null ? cmbCanvasSize.SelectedItem.ToString()! : "16x20", "16x20");  
+                string seller = SanitizePathToken(txtSeller.Text, "FREE");  
   
                 int postedCount = 0;  
                 List<string> generatedCanvasNumbers = new List<string>();  
@@ -3282,7 +3530,7 @@ namespace LabTools
                     await Task.Run(() =>
                     {
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());  
-                        File.Move(tempFilePath, finalFilePath);  
+                        File.Move(tempFilePath, finalFilePath, overwrite: true);  
                     });
 
                     AutoCopyPrintedPhotosForHybridShip(cabin, checkedItems.Select(x => x.FullPath));
@@ -3302,7 +3550,7 @@ namespace LabTools
             if (string.IsNullOrWhiteSpace(driveLetter)) { MessageBox.Show("Please enter a target USB drive letter.", "Missing USB Drive", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }  
   
             string targetDir = driveLetter + @":\";  
-            string cabin = txtCabin.Text.Trim();  
+            string cabin = SanitizePathToken(txtCabin.Text);  
             if (!string.IsNullOrEmpty(cabin)) targetDir = Path.Combine(targetDir, cabin);  
   
             await CopyFilesWithProgressAsync(targetDir, "USB Drive");  
@@ -3311,7 +3559,7 @@ namespace LabTools
         private async void CopyToDownloadsFolder()  
         {  
             string targetDir = config.DownloadsFolder;  
-            string cabin = txtCabin.Text.Trim();  
+            string cabin = SanitizePathToken(txtCabin.Text);  
             if (!string.IsNullOrEmpty(cabin)) targetDir = Path.Combine(targetDir, cabin);  
   
             await CopyFilesWithProgressAsync(targetDir, "Downloads Folder");  
@@ -3400,9 +3648,11 @@ namespace LabTools
             {
                 var fi1 = new FileInfo(file1);
                 var fi2 = new FileInfo(file2);
-                if (fi1.Length != fi2.Length) return false;
-                using (var fs1 = File.OpenRead(file1))
-                using (var fs2 = File.OpenRead(file2))
+                if (!fi1.Exists || !fi2.Exists || fi1.Length != fi2.Length) return false;
+                if (Math.Abs((fi1.LastWriteTimeUtc - fi2.LastWriteTimeUtc).TotalSeconds) <= 2.0) return true;
+
+                using (var fs1 = new FileStream(file1, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536))
+                using (var fs2 = new FileStream(file2, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536))
                 {
                     byte[] b1 = new byte[64 * 1024];
                     byte[] b2 = new byte[64 * 1024];
@@ -3412,8 +3662,7 @@ namespace LabTools
                         int r2 = fs2.Read(b2, 0, b2.Length);
                         if (r1 != r2) return false;
                         if (r1 == 0) return true;
-                        for (int i = 0; i < r1; i++)
-                            if (b1[i] != b2[i]) return false;
+                        if (!b1.AsSpan(0, r1).SequenceEqual(b2.AsSpan(0, r2))) return false;
                     }
                 }
             }
@@ -3426,10 +3675,13 @@ namespace LabTools
             {
                 try
                 {
-                    Invoke(new Action(() =>
+                    BeginInvoke(new Action(() =>
                     {
-                        lblStatusLeft.Text = "● " + message;
-                        UpdateHybridShipBadgeDisplay();
+                        if (!IsDisposed)
+                        {
+                            lblStatusLeft.Text = "● " + message;
+                            UpdateHybridShipBadgeDisplay();
+                        }
                     }));
                 }
                 catch { }
@@ -3680,23 +3932,17 @@ namespace LabTools
                         FilesRaw = string.Join(" | ", fileNames)
                     };
 
-                    List<HistoryRecord> snapshotToSave;
-                    lock (historyLock)
-                    {
-                        var currentList = LoadVoyageHistoryRecords(voyageName);
-                        currentList.Add(newRecord);
-                        cachedHistoryVoyage = voyageName;
-                        cachedHistoryRecords = new List<HistoryRecord>(currentList);
-                        snapshotToSave = new List<HistoryRecord>(currentList);
-                    }
-
                     _ = Task.Run(() =>
                     {
                         try
                         {
                             lock (historyLock)
                             {
-                                WriteUnifiedBorderedHistoryFile(voyageName, snapshotToSave);
+                                var currentList = LoadVoyageHistoryRecords(voyageName, forceDiskReload: true);
+                                currentList.Add(newRecord);
+                                cachedHistoryVoyage = voyageName;
+                                cachedHistoryRecords = new List<HistoryRecord>(currentList);
+                                WriteUnifiedBorderedHistoryFile(voyageName, currentList);
                             }
                         }
                         catch (Exception ex)
@@ -3720,8 +3966,17 @@ namespace LabTools
             TextBox txtVoyage = new TextBox() { Text = GetNetworkVoyage(), Location = new Point(160, 17), Width = 150 };  
             Button btnSetVoyage = new Button() { Text = "Save Voyage", Location = new Point(320, 16), Width = 100, Height = 27, BackColor = secondaryBackground, ForeColor = textPrimary, FlatStyle = FlatStyle.Flat };  
   
-            ListView lv = new ListView() { Location = new Point(20, 55), Width = 625, Height = 360, View = View.Details, FullRowSelect = true, GridLines = true, BackColor = secondaryBackground, ForeColor = textPrimary };  
+            ListView lv = new ListView() { Location = new Point(20, 55), Width = 625, Height = 360, View = View.Details, FullRowSelect = true, GridLines = true, OwnerDraw = true, BackColor = secondaryBackground, ForeColor = textPrimary };  
             lv.Columns.Add("Date & Time", 140); lv.Columns.Add("Order ID", 90); lv.Columns.Add("Cabin No.", 75); lv.Columns.Add("Machine", 90); lv.Columns.Add("Print Size", 120); lv.Columns.Add("Qty", 50);  
+            lv.DrawColumnHeader += (s, e) =>
+            {
+                Color hdrBg = IsDarkMode ? Color.FromArgb(33, 35, 39) : Color.FromArgb(224, 226, 232);
+                using (Brush b = new SolidBrush(hdrBg)) e.Graphics.FillRectangle(b, e.Bounds);
+                using (Pen p = new Pen(cardBorderColor)) e.Graphics.DrawRectangle(p, e.Bounds.X, e.Bounds.Y, e.Bounds.Width - 1, e.Bounds.Height - 1);
+                TextRenderer.DrawText(e.Graphics, e.Header?.Text ?? "", RowTitleFont, e.Bounds, textPrimary, TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            };
+            lv.DrawItem += (s, e) => { e.DrawDefault = true; };
+            lv.DrawSubItem += (s, e) => { e.DrawDefault = true; };
   
             Action loadHistory = () => {  
                 lv.Items.Clear();  
@@ -3837,21 +4092,33 @@ namespace LabTools
                           
                         List<string> foundPaths = new List<string>();  
                         string printedDir = !string.IsNullOrWhiteSpace(config.PrintedFolder) ? config.PrintedFolder : @"Z:\Printed";  
+                        var missingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                           
-                        foreach(var f in targetFiles) {  
+                        foreach (var f in targetFiles)
+                        {  
                             if (string.IsNullOrWhiteSpace(f)) continue;  
-                            string possiblePath = Path.Combine(printedDir, f.Trim());  
-                            if (File.Exists(possiblePath)) {  
+                            string safeFile = Path.GetFileName(f.Trim());
+                            string possiblePath = Path.Combine(printedDir, safeFile);  
+                            if (File.Exists(possiblePath))
                                 foundPaths.Add(possiblePath);  
-                            } else {  
-                                try {  
-                                    var match = Directory.EnumerateFiles(printedDir, f.Trim(), SearchOption.AllDirectories).FirstOrDefault();  
-                                    if (match != null) foundPaths.Add(match);  
-                                } catch { }  
-                            }  
-                        }  
+                            else
+                                missingNames.Add(safeFile);
+                        }
+
+                        if (missingNames.Count > 0 && Directory.Exists(printedDir))
+                        {
+                            foreach (string file in FastEnumerateImageFiles(printedDir, CancellationToken.None))
+                            {
+                                string fName = Path.GetFileName(file);
+                                if (missingNames.Remove(fName))
+                                {
+                                    foundPaths.Add(file);
+                                    if (missingNames.Count == 0) break;
+                                }
+                            }
+                        }
                           
-                        if(foundPaths.Count == 0) {  
+                        if (foundPaths.Count == 0) {  
                              MessageBox.Show("Could not physically locate the original files in the Printed folder.", "Files Missing", MessageBoxButtons.OK, MessageBoxIcon.Error);  
                              return;  
                         }  
@@ -3867,13 +4134,13 @@ namespace LabTools
                         sb.AppendLine("OrderReferenceID=");  
                         sb.AppendLine("OrderFirstName = " + orderType);  
                         sb.AppendLine("OrderLastName = REPRINT");  
-                        sb.AppendLine("ExtCabin = " + cabin);  
+                        sb.AppendLine("ExtCabin = " + SanitizePathToken(cabin));  
                         sb.AppendLine("ExtFolio = ");  
                         sb.AppendLine();  
                           
                         string cleanSize = size.Replace(" + Auto 4W", "").Replace(" (Canvas Copy)", "").Replace(" (canvas copy)", "");  
                         bool appendAuto4W = size.Contains("+ Auto 4W");  
-                        int perPhotoQty = Math.Max(1, totalLoggedQty / Math.Max(1, foundPaths.Count));
+                        int perPhotoQty = Math.Max(1, totalLoggedQty / Math.Max(1, targetFiles.Count));
   
                         foreach (var path in foundPaths) {  
                             AppendPrintBlocksForItem(sb, cleanSize, perPhotoQty, "Glossy", path, appendAuto4W, false);
@@ -3883,7 +4150,7 @@ namespace LabTools
                         string tempFilePath = Path.Combine(machineTargetFolder, newOrderId + ".tmp");  
                         string finalFilePath = Path.Combine(machineTargetFolder, newOrderId + ".txt");  
                         Program.SafeWriteAllText(tempFilePath, sb.ToString());  
-                        File.Move(tempFilePath, finalFilePath);  
+                        File.Move(tempFilePath, finalFilePath, overwrite: true);  
 
                         AutoCopyPrintedPhotosForHybridShip(cabin, foundPaths);
                           
@@ -3939,6 +4206,7 @@ namespace LabTools
             printshopWatcher?.Dispose();
             hubCanvasWatcher?.Dispose();
             masterSyncWatcher?.Dispose();
+            watcherDebounceTimer?.Dispose();
             flashTimer?.Dispose();
             picLogo?.Image?.Dispose();
             foreach (var bmp in hubThumbCache.Values) bmp?.Dispose();
@@ -3969,6 +4237,7 @@ namespace LabTools
         public Color CardColor { get; set; } = Color.FromArgb(50, 52, 58);
         public Color BorderColor { get; set; } = Color.FromArgb(82, 86, 94);
         public Color HeaderColor { get; set; } = Color.FromArgb(115, 218, 255);
+        private static readonly Font CardHeaderFont = new Font("Segoe UI", 8.25f, FontStyle.Bold);
         public int CornerRadius { get; set; } = 12;
 
         public RoundedCardPanel()
@@ -4008,10 +4277,9 @@ namespace LabTools
 
             if (!string.IsNullOrEmpty(Title))
             {
-                using (Font f = new Font("Segoe UI", 8.25f, FontStyle.Bold))
                 using (Brush b = new SolidBrush(HeaderColor))
                 {
-                    e.Graphics.DrawString(Title, f, b, new PointF(14, 8));
+                    e.Graphics.DrawString(Title, CardHeaderFont, b, new PointF(14, 8));
                 }
             }
         }
@@ -4022,6 +4290,7 @@ namespace LabTools
     // ========================================================================  
     public class ThemeToggleSwitch : Control
     {
+        private static readonly Font EmojiSwitchFont = new Font("Segoe UI Emoji", 8.25f, FontStyle.Regular);
         private bool isDark = true;
         public bool IsDark
         {
@@ -4080,21 +4349,18 @@ namespace LabTools
             }
 
             string labelText = isDark ? "🌙" : "☀️";
-            using (Font f = new Font("Segoe UI Emoji", 8.25f, FontStyle.Regular))
-            {
-                Rectangle textRect = isDark
-                    ? new Rectangle(rect.X + knobSize + 2, rect.Y, w - knobSize - 4, h)
-                    : new Rectangle(rect.X + 2, rect.Y, w - knobSize - 4, h);
+            Rectangle textRect = isDark
+                ? new Rectangle(rect.X + knobSize + 2, rect.Y, w - knobSize - 4, h)
+                : new Rectangle(rect.X + 2, rect.Y, w - knobSize - 4, h);
 
-                TextRenderer.DrawText(
-                    e.Graphics,
-                    labelText,
-                    f,
-                    textRect,
-                    textColor,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
-                );
-            }
+            TextRenderer.DrawText(
+                e.Graphics,
+                labelText,
+                EmojiSwitchFont,
+                textRect,
+                textColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+            );
         }
     }
 
@@ -4103,6 +4369,7 @@ namespace LabTools
     // ========================================================================  
     public class CapsuleToggleSwitch : Control
     {
+        private static readonly Font CapsuleLabelFont = new Font("Segoe UI", 8.5f, FontStyle.Bold);
         private bool isOn = false;
         public bool IsOn
         {
@@ -4155,21 +4422,18 @@ namespace LabTools
             }
 
             string labelText = isOn ? "ON" : "OFF";
-            using (Font f = new Font("Segoe UI", 8.5f, FontStyle.Bold))
-            {
-                Rectangle textRect = isOn
-                    ? new Rectangle(rect.X + 6, rect.Y, w - knobSize - 8, h)
-                    : new Rectangle(rect.X + knobSize + 4, rect.Y, w - knobSize - 8, h);
+            Rectangle textRect = isOn
+                ? new Rectangle(rect.X + 6, rect.Y, w - knobSize - 8, h)
+                : new Rectangle(rect.X + knobSize + 4, rect.Y, w - knobSize - 8, h);
 
-                TextRenderer.DrawText(
-                    e.Graphics,
-                    labelText,
-                    f,
-                    textRect,
-                    Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
-                );
-            }
+            TextRenderer.DrawText(
+                e.Graphics,
+                labelText,
+                CapsuleLabelFont,
+                textRect,
+                Color.White,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+            );
         }
     }
   
@@ -5438,4 +5702,269 @@ namespace LabTools
             base.OnFormClosed(e);
         }
     }
+
+    // ========================================================================  
+    // CONFIGURATION & NETWORK MASTER SYNC ENGINE  
+    // ========================================================================  
+    public class MediaSizeRule
+    {
+        public string Name { get; set; } = "";
+        public bool IsMultiBlock { get; set; } = false;
+        public string Block1Size { get; set; } = "";
+        public string Block1PrintName { get; set; } = "";
+        public string Block2Size { get; set; } = "";
+        public string Block2PrintName { get; set; } = "";
+    }
+
+    public class CustomTemplateRecord
+    {
+        public string Name { get; set; } = "";
+        public string Path { get; set; } = "";
+        public bool IsDual { get; set; } = false;
+    }
+
+    public class WorkstationProfile
+    {
+        public string SelectedMachine { get; set; } = "Machine C";
+        public string UsbDrive { get; set; } = "D";
+        public bool IsDarkModePreference { get; set; } = true;
+        public bool HybridShip { get; set; } = false;
+    }
+
+    public class AppConfig
+    {
+        private static readonly object syncLock = new object();
+        private const string LocalPointerFileName = "labtools_master_path.txt";
+        private const string DefaultMasterFileName = "ActiveVoyage.txt";
+
+        public string MasterSyncFolder { get; set; } = @"Z:\PixelsOrder\Processed";
+        public string CurrentVoyage { get; set; } = "PO101126";
+        public int LastOrderId { get; set; } = 6000000;
+        public long FolderSyncVersion { get; set; } = 1;
+
+        public string PrintedFolder { get; set; } = @"Z:\Printed";
+        public string OrdersFolder { get; set; } = @"Z:\PixelsOrder\Processed";
+        public string DownloadsFolder { get; set; } = @"C:\Downloads";
+        public string ToPrintFolder { get; set; } = @"Z:\ToPrint";
+        public string BorderedPrintsFolder { get; set; } = @"Z:\PixelsOrder\Prints";
+        public string PrintshopFolder { get; set; } = @"Z:\Printshop";
+        public string HubAppCanvasFolder { get; set; } = @"Z:\HubAppCanvas";
+        public string CopyrightFolder { get; set; } = @"Z:\Copyright";
+        public string CCFolder { get; set; } = @"Z:\CC";
+        public string DestinationForWhiteImages { get; set; } = @"Z:\WhiteImages";
+
+        public string MachineA { get; set; } = @"Z:\PixelsOrder\HotFolderA";
+        public string MachineB { get; set; } = @"Z:\PixelsOrder\HotFolderB";
+        public string MachineC { get; set; } = @"Z:\PixelsOrder\HotFolderC";
+        public string MachineD { get; set; } = @"Z:\PixelsOrder\HotFolderD";
+
+        public string SelectedMachine { get; set; } = "Machine C";
+        public string UsbDrive { get; set; } = "D";
+        public bool IsDarkModePreference { get; set; } = true;
+        public bool HybridShip { get; set; } = false;
+
+        public List<string> MediaSizes { get; set; } = new List<string>(MainForm.DefaultMediaSizes);
+        public List<MediaSizeRule> MediaSizeRules { get; set; } = new List<MediaSizeRule>();
+        public List<CustomTemplateRecord> CustomTemplates { get; set; } = new List<CustomTemplateRecord>();
+        public Dictionary<string, WorkstationProfile> WorkstationProfiles { get; set; } = new Dictionary<string, WorkstationProfile>(StringComparer.OrdinalIgnoreCase);
+
+        private static string GetLocalPointerPath()
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string dir = Path.Combine(appData, "LabTools");
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, LocalPointerFileName);
+        }
+
+        public static string ResolveMasterFilePath(string? configuredPath)
+        {
+            string raw = configuredPath?.Trim() ?? "";
+            if (string.IsNullOrEmpty(raw))
+            {
+                try
+                {
+                    string ptr = GetLocalPointerPath();
+                    if (File.Exists(ptr)) raw = File.ReadAllText(ptr).Trim();
+                }
+                catch { }
+            }
+            if (string.IsNullOrEmpty(raw)) raw = @"Z:\PixelsOrder\Processed";
+            if (raw.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) || raw.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                return raw;
+            return Path.Combine(raw, DefaultMasterFileName);
+        }
+
+        public static string ResolveMasterDirectoryPath(string? configuredPath)
+        {
+            string filePath = ResolveMasterFilePath(configuredPath);
+            return Path.GetDirectoryName(filePath) ?? @"Z:\PixelsOrder\Processed";
+        }
+
+        public static AppConfig Load()
+        {
+            lock (syncLock)
+            {
+                var cfg = new AppConfig();
+                try
+                {
+                    string ptr = GetLocalPointerPath();
+                    if (File.Exists(ptr))
+                    {
+                        string savedMaster = File.ReadAllText(ptr).Trim();
+                        if (!string.IsNullOrWhiteSpace(savedMaster)) cfg.MasterSyncFolder = savedMaster;
+                    }
+                }
+                catch { }
+
+                string masterFile = ResolveMasterFilePath(cfg.MasterSyncFolder);
+                try
+                {
+                    if (File.Exists(masterFile))
+                    {
+                        string[] lines = Program.SafeReadAllLines(masterFile);
+                        if (lines.Length > 0)
+                        {
+                            string firstLine = lines[0].Trim();
+                            if (!firstLine.StartsWith("{"))
+                            {
+                                cfg.CurrentVoyage = firstLine;
+                                string jsonPart = string.Join(Environment.NewLine, lines.Skip(1)).Trim();
+                                if (!string.IsNullOrEmpty(jsonPart))
+                                {
+                                    var loaded = JsonSerializer.Deserialize<AppConfig>(jsonPart);
+                                    if (loaded != null)
+                                    {
+                                        loaded.CurrentVoyage = firstLine;
+                                        loaded.MasterSyncFolder = cfg.MasterSyncFolder;
+                                        cfg = loaded;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                string fullJson = string.Join(Environment.NewLine, lines);
+                                var loaded = JsonSerializer.Deserialize<AppConfig>(fullJson);
+                                if (loaded != null)
+                                {
+                                    loaded.MasterSyncFolder = cfg.MasterSyncFolder;
+                                    cfg = loaded;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+
+                string pcName = Environment.MachineName;
+                if (cfg.WorkstationProfiles != null && cfg.WorkstationProfiles.TryGetValue(pcName, out var profile))
+                {
+                    cfg.SelectedMachine = profile.SelectedMachine;
+                    cfg.UsbDrive = profile.UsbDrive;
+                    cfg.IsDarkModePreference = profile.IsDarkModePreference;
+                    cfg.HybridShip = profile.HybridShip;
+                }
+                return cfg;
+            }
+        }
+
+        public void Save(bool syncAllFoldersAcrossPcs = false)
+        {
+            lock (syncLock)
+            {
+                try
+                {
+                    File.WriteAllText(GetLocalPointerPath(), MasterSyncFolder ?? "");
+                }
+                catch { }
+
+                if (syncAllFoldersAcrossPcs) FolderSyncVersion++;
+
+                string pcName = Environment.MachineName;
+                if (WorkstationProfiles == null)
+                    WorkstationProfiles = new Dictionary<string, WorkstationProfile>(StringComparer.OrdinalIgnoreCase);
+
+                WorkstationProfiles[pcName] = new WorkstationProfile
+                {
+                    SelectedMachine = this.SelectedMachine,
+                    UsbDrive = this.UsbDrive,
+                    IsDarkModePreference = this.IsDarkModePreference,
+                    HybridShip = this.HybridShip
+                };
+
+                try
+                {
+                    string masterFile = ResolveMasterFilePath(MasterSyncFolder);
+                    string? dir = Path.GetDirectoryName(masterFile);
+                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+                    if (File.Exists(masterFile))
+                    {
+                        try { File.SetAttributes(masterFile, FileAttributes.Normal); } catch { }
+                    }
+
+                    string json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+                    string payload = (CurrentVoyage?.Trim().ToUpperInvariant() ?? "PO101126") + Environment.NewLine + json;
+                    Program.SafeWriteAllText(masterFile, payload);
+                }
+                catch { }
+            }
+        }
+
+        public int AllocateNextOrderId(Func<int> legacyScanner)
+        {
+            lock (syncLock)
+            {
+                var latest = Load();
+                int baseId = Math.Max(this.LastOrderId, latest.LastOrderId);
+                if (baseId <= 6000000 && legacyScanner != null)
+                {
+                    baseId = Math.Max(baseId, legacyScanner());
+                }
+                int nextId = baseId + 1;
+                if (nextId > 9999999) nextId = 6000001;
+
+                this.LastOrderId = nextId;
+                latest.LastOrderId = nextId;
+                latest.Save(syncAllFoldersAcrossPcs: false);
+                return nextId;
+            }
+        }
+
+        public MediaSizeRule GetEffectiveRule(string sizeName)
+        {
+            sizeName = sizeName?.Trim() ?? "8x10";
+            if (MediaSizeRules != null)
+            {
+                var custom = MediaSizeRules.FirstOrDefault(r => r.Name.Equals(sizeName, StringComparison.OrdinalIgnoreCase));
+                if (custom != null && !string.IsNullOrWhiteSpace(custom.Block1Size))
+                    return custom;
+            }
+
+            bool hasCombo = sizeName.IndexOf("combo", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool hasAnd = sizeName.IndexOf(" and ", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (hasAnd && !hasCombo)
+            {
+                string b1 = sizeName.StartsWith("5x7", StringComparison.OrdinalIgnoreCase) ? "5x7" : "8x10";
+                return new MediaSizeRule
+                {
+                    Name = sizeName,
+                    IsMultiBlock = true,
+                    Block1Size = b1,
+                    Block1PrintName = b1,
+                    Block2Size = "4-Wallets (vert)",
+                    Block2PrintName = "4-Wallets (vert)"
+                };
+            }
+
+            return new MediaSizeRule
+            {
+                Name = sizeName,
+                IsMultiBlock = false,
+                Block1Size = sizeName,
+                Block1PrintName = sizeName
+            };
+        }
+    }
 }
+
