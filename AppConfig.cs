@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -54,6 +55,9 @@ namespace LabTools
 
     public class AppConfig
     {
+        private static readonly object syncLock = new object();
+        private static readonly JsonSerializerOptions IndentedJsonOptions = new JsonSerializerOptions { WriteIndented = true };
+
         private const string RegistryKeyPath = @"SOFTWARE\LabTools";
         public const string DefaultMasterSyncFolder = @"Z:\PhotoLab\EHM\GIL";
         public const string MasterSyncFileName = "ActiveVoyage.txt";
@@ -188,154 +192,190 @@ namespace LabTools
             catch { }
         }
 
+        private static void AtomicSaveMasterFile(string masterFilePath, string content)
+        {
+            string? dir = Path.GetDirectoryName(masterFilePath);
+            if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+            string tempPath = masterFilePath + "." + CurrentPcName + ".tmp";
+            const int maxAttempts = 15;
+
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    ClearHiddenAttributesForWrite(tempPath);
+                    File.WriteAllText(tempPath, content, Encoding.UTF8);
+                    ClearHiddenAttributesForWrite(masterFilePath);
+                    File.Move(tempPath, masterFilePath, overwrite: true);
+                    ApplySuperHiddenAttributes(masterFilePath);
+                    return;
+                }
+                catch (IOException) when (attempt < maxAttempts)
+                {
+                    Thread.Sleep(150);
+                }
+                catch (UnauthorizedAccessException) when (attempt < maxAttempts)
+                {
+                    ClearHiddenAttributesForWrite(masterFilePath);
+                    Thread.Sleep(150);
+                }
+            }
+        }
+
         // ========================================================================
         // ONE-FILE BRAIN LOADER (Line 1 = Voyage Code, Line 2+ = JSON Payload)
         // ========================================================================
         public static AppConfig Load()
         {
-            string masterFolderSetting = GetLocalMasterSyncPathFromRegistry();
-            string masterFilePath = ResolveMasterFilePath(masterFolderSetting);
-
-            AppConfig config = new AppConfig
+            lock (syncLock)
             {
-                MasterSyncFolder = masterFolderSetting
-            };
+                string masterFolderSetting = GetLocalMasterSyncPathFromRegistry();
+                string masterFilePath = ResolveMasterFilePath(masterFolderSetting);
 
-            bool loadedFromMaster = false;
-
-            try
-            {
-                if (File.Exists(masterFilePath))
+                AppConfig config = new AppConfig
                 {
-                    string rawText = Program.SafeReadAllText(masterFilePath);
-                    if (!string.IsNullOrWhiteSpace(rawText))
-                    {
-                        int firstBrace = rawText.IndexOf('{');
-                        if (firstBrace >= 0)
-                        {
-                            string headerPart = rawText.Substring(0, firstBrace).Trim();
-                            string jsonPart = rawText.Substring(firstBrace).Trim();
+                    MasterSyncFolder = masterFolderSetting
+                };
 
-                            var parsed = JsonSerializer.Deserialize<AppConfig>(jsonPart);
-                            if (parsed != null)
+                bool loadedFromMaster = false;
+
+                try
+                {
+                    if (File.Exists(masterFilePath))
+                    {
+                        string rawText = Program.SafeReadAllText(masterFilePath);
+                        if (!string.IsNullOrWhiteSpace(rawText))
+                        {
+                            int firstBrace = rawText.IndexOf('{');
+                            if (firstBrace >= 0)
                             {
-                                config = parsed;
-                                config.MasterSyncFolder = masterFolderSetting;
-                                if (!string.IsNullOrWhiteSpace(headerPart))
+                                string headerPart = rawText.Substring(0, firstBrace).Trim();
+                                string jsonPart = rawText.Substring(firstBrace).Trim();
+
+                                var parsed = JsonSerializer.Deserialize<AppConfig>(jsonPart);
+                                if (parsed != null)
                                 {
-                                    string firstLine = headerPart.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
-                                    if (!string.IsNullOrWhiteSpace(firstLine))
-                                        config.CurrentVoyage = firstLine.ToUpperInvariant();
+                                    config = parsed;
+                                    config.MasterSyncFolder = masterFolderSetting;
+                                    if (!string.IsNullOrWhiteSpace(headerPart))
+                                    {
+                                        string firstLine = headerPart.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+                                        if (!string.IsNullOrWhiteSpace(firstLine))
+                                            config.CurrentVoyage = firstLine.ToUpperInvariant();
+                                    }
+                                    loadedFromMaster = true;
                                 }
-                                loadedFromMaster = true;
                             }
-                        }
-                        else
-                        {
-                            // Legacy ActiveVoyage.txt with only the voyage string on line 1
-                            string firstLine = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
-                            if (!string.IsNullOrWhiteSpace(firstLine))
+                            else
                             {
-                                config.CurrentVoyage = firstLine.ToUpperInvariant();
+                                // Legacy ActiveVoyage.txt with only the voyage string on line 1
+                                string firstLine = rawText.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "";
+                                if (!string.IsNullOrWhiteSpace(firstLine))
+                                {
+                                    config.CurrentVoyage = firstLine.ToUpperInvariant();
+                                }
                             }
                         }
+                        ApplySuperHiddenAttributes(masterFilePath);
                     }
-                    ApplySuperHiddenAttributes(masterFilePath);
                 }
-            }
-            catch { }
+                catch { }
 
-            // One-time seamless migration from legacy local files if present
-            bool migratedLegacyFiles = false;
-            try
-            {
-                if (File.Exists("config.json"))
+                // One-time seamless migration from legacy local files if present
+                bool migratedLegacyFiles = false;
+                try
                 {
-                    string legacyJson = File.ReadAllText("config.json");
-                    var legacyCfg = JsonSerializer.Deserialize<AppConfig>(legacyJson);
-                    if (legacyCfg != null && !loadedFromMaster)
+                    if (File.Exists("config.json"))
                     {
-                        string currentVoyageBackup = config.CurrentVoyage;
-                        config = legacyCfg;
-                        config.MasterSyncFolder = masterFolderSetting;
-                        if (!string.IsNullOrWhiteSpace(currentVoyageBackup))
-                            config.CurrentVoyage = currentVoyageBackup;
-                    }
-                    try { File.Delete("config.json"); } catch { }
-                    migratedLegacyFiles = true;
-                }
-
-                if (File.Exists("CustomTemplates.txt"))
-                {
-                    foreach (var line in Program.SafeReadAllLines("CustomTemplates.txt"))
-                    {
-                        var parts = line.Split('|');
-                        if (parts.Length >= 3)
+                        string legacyJson = File.ReadAllText("config.json");
+                        var legacyCfg = JsonSerializer.Deserialize<AppConfig>(legacyJson);
+                        if (legacyCfg != null && !loadedFromMaster)
                         {
-                            string tName = parts[0].Trim();
-                            string tPath = parts[1].Trim();
-                            bool tDual = parts[2].Trim().Equals("True", StringComparison.OrdinalIgnoreCase);
-                            if (!string.IsNullOrEmpty(tName) && !config.CustomTemplates.Any(t => t.Name.Equals(tName, StringComparison.OrdinalIgnoreCase)))
+                            string currentVoyageBackup = config.CurrentVoyage;
+                            config = legacyCfg;
+                            config.MasterSyncFolder = masterFolderSetting;
+                            if (!string.IsNullOrWhiteSpace(currentVoyageBackup))
+                                config.CurrentVoyage = currentVoyageBackup;
+                        }
+                        try { File.Delete("config.json"); } catch { }
+                        migratedLegacyFiles = true;
+                    }
+
+                    if (File.Exists("CustomTemplates.txt"))
+                    {
+                        foreach (var line in Program.SafeReadAllLines("CustomTemplates.txt"))
+                        {
+                            var parts = line.Split('|');
+                            if (parts.Length >= 3)
                             {
-                                config.CustomTemplates.Add(new CustomTemplateRecord { Name = tName, Path = tPath, IsDual = tDual });
+                                string tName = parts[0].Trim();
+                                string tPath = parts[1].Trim();
+                                bool tDual = parts[2].Trim().Equals("True", StringComparison.OrdinalIgnoreCase);
+                                if (!string.IsNullOrEmpty(tName) && !config.CustomTemplates.Any(t => t.Name.Equals(tName, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    config.CustomTemplates.Add(new CustomTemplateRecord { Name = tName, Path = tPath, IsDual = tDual });
+                                }
                             }
                         }
+                        try { File.Delete("CustomTemplates.txt"); } catch { }
+                        migratedLegacyFiles = true;
                     }
-                    try { File.Delete("CustomTemplates.txt"); } catch { }
-                    migratedLegacyFiles = true;
+
+                    if (File.Exists("HubAppCanvasFolder.txt")) { try { File.Delete("HubAppCanvasFolder.txt"); } catch { } }
+                    if (File.Exists("MediaSizes.txt")) { try { File.Delete("MediaSizes.txt"); } catch { } }
                 }
+                catch { }
 
-                if (File.Exists("HubAppCanvasFolder.txt")) { try { File.Delete("HubAppCanvasFolder.txt"); } catch { } }
-                if (File.Exists("MediaSizes.txt")) { try { File.Delete("MediaSizes.txt"); } catch { } }
-            }
-            catch { }
+                if (config.MediaSizes == null || config.MediaSizes.Count == 0)
+                    config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
 
-            if (config.MediaSizes == null || config.MediaSizes.Count == 0)
-                config.MediaSizes = new List<string>(MainForm.DefaultMediaSizes);
+                if (config.MediaSizeRules == null)
+                    config.MediaSizeRules = new List<MediaSizeRule>();
 
-            if (config.MediaSizeRules == null)
-                config.MediaSizeRules = new List<MediaSizeRule>();
+                if (config.CustomTemplates == null)
+                    config.CustomTemplates = new List<CustomTemplateRecord>();
 
-            if (config.CustomTemplates == null)
-                config.CustomTemplates = new List<CustomTemplateRecord>();
+                if (config.Workstations == null)
+                    config.Workstations = new Dictionary<string, PcWorkstationProfile>(StringComparer.OrdinalIgnoreCase);
+                else if (! ReferenceEquals(config.Workstations.Comparer, StringComparer.OrdinalIgnoreCase))
+                    config.Workstations = new Dictionary<string, PcWorkstationProfile>(config.Workstations, StringComparer.OrdinalIgnoreCase);
 
-            if (config.Workstations == null)
-                config.Workstations = new Dictionary<string, PcWorkstationProfile>(StringComparer.OrdinalIgnoreCase);
-
-            // Apply Per-PC Profile for this workstation
-            if (config.Workstations.TryGetValue(CurrentPcName, out PcWorkstationProfile? pcProfile) && pcProfile != null)
-            {
-                config.HybridShip = pcProfile.HybridShip;
-                config.SelectedMachine = string.IsNullOrWhiteSpace(pcProfile.SelectedMachine) ? "Machine C" : pcProfile.SelectedMachine;
-                config.UsbDrive = string.IsNullOrWhiteSpace(pcProfile.UsbDrive) ? "D" : pcProfile.UsbDrive;
-                config.IsDarkModePreference = pcProfile.IsDarkMode;
-
-                // Use local folder overrides only if this PC saved local paths AFTER the last global Sync button press
-                if (pcProfile.HasLocalFolderOverrides && pcProfile.AppliedFolderSyncVersion >= config.FolderSyncVersion)
+                // Apply Per-PC Profile for this workstation
+                if (config.Workstations.TryGetValue(CurrentPcName, out PcWorkstationProfile? pcProfile) && pcProfile != null)
                 {
-                    config.PrintedFolder = pcProfile.PrintedFolder;
-                    config.OrdersFolder = pcProfile.OrdersFolder;
-                    config.DownloadsFolder = pcProfile.DownloadsFolder;
-                    config.BorderedPrintsFolder = pcProfile.BorderedPrintsFolder;
-                    config.PrintshopFolder = pcProfile.PrintshopFolder;
-                    config.HubAppCanvasFolder = pcProfile.HubAppCanvasFolder;
-                    config.CopyrightFolder = pcProfile.CopyrightFolder;
-                    config.CCFolder = pcProfile.CCFolder;
-                    config.DestinationForWhiteImages = pcProfile.DestinationForWhiteImages;
-                    config.ToPrintFolder = pcProfile.ToPrintFolder;
-                    config.MachineA = pcProfile.MachineA;
-                    config.MachineB = pcProfile.MachineB;
-                    config.MachineC = pcProfile.MachineC;
-                    config.MachineD = pcProfile.MachineD;
+                    config.HybridShip = pcProfile.HybridShip;
+                    config.SelectedMachine = string.IsNullOrWhiteSpace(pcProfile.SelectedMachine) ? "Machine C" : pcProfile.SelectedMachine;
+                    config.UsbDrive = string.IsNullOrWhiteSpace(pcProfile.UsbDrive) ? "D" : pcProfile.UsbDrive;
+                    config.IsDarkModePreference = pcProfile.IsDarkMode;
+
+                    // Use local folder overrides only if this PC saved local paths AFTER the last global Sync button press
+                    if (pcProfile.HasLocalFolderOverrides && pcProfile.AppliedFolderSyncVersion >= config.FolderSyncVersion)
+                    {
+                        config.PrintedFolder = pcProfile.PrintedFolder;
+                        config.OrdersFolder = pcProfile.OrdersFolder;
+                        config.DownloadsFolder = pcProfile.DownloadsFolder;
+                        config.BorderedPrintsFolder = pcProfile.BorderedPrintsFolder;
+                        config.PrintshopFolder = pcProfile.PrintshopFolder;
+                        config.HubAppCanvasFolder = pcProfile.HubAppCanvasFolder;
+                        config.CopyrightFolder = pcProfile.CopyrightFolder;
+                        config.CCFolder = pcProfile.CCFolder;
+                        config.DestinationForWhiteImages = pcProfile.DestinationForWhiteImages;
+                        config.ToPrintFolder = pcProfile.ToPrintFolder;
+                        config.MachineA = pcProfile.MachineA;
+                        config.MachineB = pcProfile.MachineB;
+                        config.MachineC = pcProfile.MachineC;
+                        config.MachineD = pcProfile.MachineD;
+                    }
                 }
-            }
 
-            if (migratedLegacyFiles || !File.Exists(masterFilePath))
-            {
-                config.Save(syncAllFoldersAcrossPcs: false);
-            }
+                if (migratedLegacyFiles || !File.Exists(masterFilePath))
+                {
+                    config.Save(syncAllFoldersAcrossPcs: false);
+                }
 
-            return config;
+                return config;
+            }
         }
 
         // ========================================================================
@@ -343,119 +383,124 @@ namespace LabTools
         // ========================================================================
         public void Save(bool syncAllFoldersAcrossPcs = false)
         {
-            SetLocalMasterSyncPathInRegistry(this.MasterSyncFolder);
-            string masterFilePath = ResolveMasterFilePath(this.MasterSyncFolder);
-
-            try
+            lock (syncLock)
             {
-                AppConfig? diskConfig = null;
-                if (File.Exists(masterFilePath))
-                {
-                    string rawText = Program.SafeReadAllText(masterFilePath);
-                    int firstBrace = rawText.IndexOf('{');
-                    if (firstBrace >= 0)
-                    {
-                        try
-                        {
-                            diskConfig = JsonSerializer.Deserialize<AppConfig>(rawText.Substring(firstBrace).Trim());
-                        }
-                        catch { }
-                    }
-                }
+                SetLocalMasterSyncPathInRegistry(this.MasterSyncFolder);
+                string masterFilePath = ResolveMasterFilePath(this.MasterSyncFolder);
 
-                if (diskConfig != null)
+                try
                 {
-                    // Always keep the highest LastOrderId across the network
-                    if (diskConfig.LastOrderId > this.LastOrderId)
-                        this.LastOrderId = diskConfig.LastOrderId;
-
-                    if (diskConfig.Workstations != null)
+                    AppConfig? diskConfig = null;
+                    if (File.Exists(masterFilePath))
                     {
-                        foreach (var kvp in diskConfig.Workstations)
+                        string rawText = Program.SafeReadAllText(masterFilePath);
+                        int firstBrace = rawText.IndexOf('{');
+                        if (firstBrace >= 0)
                         {
-                            if (!kvp.Key.Equals(CurrentPcName, StringComparison.OrdinalIgnoreCase))
+                            try
                             {
-                                this.Workstations[kvp.Key] = kvp.Value;
+                                diskConfig = JsonSerializer.Deserialize<AppConfig>(rawText.Substring(firstBrace).Trim());
+                            }
+                            catch { }
+                        }
+                    }
+
+                    if (this.Workstations == null || !ReferenceEquals(this.Workstations.Comparer, StringComparer.OrdinalIgnoreCase))
+                    {
+                        this.Workstations = this.Workstations != null
+                            ? new Dictionary<string, PcWorkstationProfile>(this.Workstations, StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, PcWorkstationProfile>(StringComparer.OrdinalIgnoreCase);
+                    }
+
+                    if (diskConfig != null)
+                    {
+                        // Always keep the highest LastOrderId across the network
+                        if (diskConfig.LastOrderId > this.LastOrderId)
+                            this.LastOrderId = diskConfig.LastOrderId;
+
+                        if (diskConfig.Workstations != null)
+                        {
+                            foreach (var kvp in diskConfig.Workstations)
+                            {
+                                if (!kvp.Key.Equals(CurrentPcName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    this.Workstations[kvp.Key] = kvp.Value;
+                                }
                             }
                         }
                     }
-                }
 
-                if (syncAllFoldersAcrossPcs)
-                {
-                    // Global Folder Sync requested: Increment FolderSyncVersion and clear local overrides on all PCs
-                    this.FolderSyncVersion = Math.Max(this.FolderSyncVersion, diskConfig?.FolderSyncVersion ?? 1) + 1;
-                    foreach (var ws in this.Workstations.Values)
+                    if (syncAllFoldersAcrossPcs)
                     {
-                        ws.HasLocalFolderOverrides = false;
-                        ws.AppliedFolderSyncVersion = this.FolderSyncVersion;
+                        // Global Folder Sync requested: Increment FolderSyncVersion and clear local overrides on all PCs
+                        this.FolderSyncVersion = Math.Max(this.FolderSyncVersion, diskConfig?.FolderSyncVersion ?? 1) + 1;
+                        foreach (var ws in this.Workstations.Values)
+                        {
+                            ws.HasLocalFolderOverrides = false;
+                            ws.AppliedFolderSyncVersion = this.FolderSyncVersion;
+                        }
                     }
+
+                    // Update this PC's profile
+                    var myProfile = new PcWorkstationProfile
+                    {
+                        HybridShip = this.HybridShip,
+                        SelectedMachine = string.IsNullOrWhiteSpace(this.SelectedMachine) ? "Machine C" : this.SelectedMachine,
+                        UsbDrive = string.IsNullOrWhiteSpace(this.UsbDrive) ? "D" : this.UsbDrive,
+                        IsDarkMode = this.IsDarkModePreference,
+                        HasLocalFolderOverrides = !syncAllFoldersAcrossPcs,
+                        AppliedFolderSyncVersion = this.FolderSyncVersion,
+                        PrintedFolder = this.PrintedFolder,
+                        OrdersFolder = this.OrdersFolder,
+                        DownloadsFolder = this.DownloadsFolder,
+                        BorderedPrintsFolder = this.BorderedPrintsFolder,
+                        PrintshopFolder = this.PrintshopFolder,
+                        HubAppCanvasFolder = this.HubAppCanvasFolder,
+                        CopyrightFolder = this.CopyrightFolder,
+                        CCFolder = this.CCFolder,
+                        DestinationForWhiteImages = this.DestinationForWhiteImages,
+                        ToPrintFolder = this.ToPrintFolder,
+                        MachineA = this.MachineA,
+                        MachineB = this.MachineB,
+                        MachineC = this.MachineC,
+                        MachineD = this.MachineD
+                    };
+                    this.Workstations[CurrentPcName] = myProfile;
+
+                    // If NOT syncing folders across all PCs and diskConfig exists, keep the shared global folders untouched
+                    // so other PCs are not affected by local folder edits on this PC
+                    AppConfig payloadToWrite = new AppConfig
+                    {
+                        CurrentVoyage = string.IsNullOrWhiteSpace(this.CurrentVoyage) ? "PO101126" : this.CurrentVoyage.Trim().ToUpperInvariant(),
+                        LastOrderId = this.LastOrderId,
+                        FolderSyncVersion = this.FolderSyncVersion,
+                        PrintedFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.PrintedFolder : diskConfig.PrintedFolder,
+                        OrdersFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.OrdersFolder : diskConfig.OrdersFolder,
+                        DownloadsFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.DownloadsFolder : diskConfig.DownloadsFolder,
+                        BorderedPrintsFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.BorderedPrintsFolder : diskConfig.BorderedPrintsFolder,
+                        PrintshopFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.PrintshopFolder : diskConfig.PrintshopFolder,
+                        HubAppCanvasFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.HubAppCanvasFolder : diskConfig.HubAppCanvasFolder,
+                        CopyrightFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.CopyrightFolder : diskConfig.CopyrightFolder,
+                        CCFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.CCFolder : diskConfig.CCFolder,
+                        DestinationForWhiteImages = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.DestinationForWhiteImages : diskConfig.DestinationForWhiteImages,
+                        ToPrintFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.ToPrintFolder : diskConfig.ToPrintFolder,
+                        MachineA = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineA : diskConfig.MachineA,
+                        MachineB = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineB : diskConfig.MachineB,
+                        MachineC = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineC : diskConfig.MachineC,
+                        MachineD = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineD : diskConfig.MachineD,
+                        MediaSizes = this.MediaSizes,
+                        MediaSizeRules = this.MediaSizeRules,
+                        CustomTemplates = this.CustomTemplates,
+                        Workstations = this.Workstations
+                    };
+
+                    string json = JsonSerializer.Serialize(payloadToWrite, IndentedJsonOptions);
+                    string combinedContent = payloadToWrite.CurrentVoyage + Environment.NewLine + json;
+
+                    AtomicSaveMasterFile(masterFilePath, combinedContent);
                 }
-
-                // Update this PC's profile
-                var myProfile = new PcWorkstationProfile
-                {
-                    HybridShip = this.HybridShip,
-                    SelectedMachine = string.IsNullOrWhiteSpace(this.SelectedMachine) ? "Machine C" : this.SelectedMachine,
-                    UsbDrive = string.IsNullOrWhiteSpace(this.UsbDrive) ? "D" : this.UsbDrive,
-                    IsDarkMode = this.IsDarkModePreference,
-                    HasLocalFolderOverrides = !syncAllFoldersAcrossPcs,
-                    AppliedFolderSyncVersion = this.FolderSyncVersion,
-                    PrintedFolder = this.PrintedFolder,
-                    OrdersFolder = this.OrdersFolder,
-                    DownloadsFolder = this.DownloadsFolder,
-                    BorderedPrintsFolder = this.BorderedPrintsFolder,
-                    PrintshopFolder = this.PrintshopFolder,
-                    HubAppCanvasFolder = this.HubAppCanvasFolder,
-                    CopyrightFolder = this.CopyrightFolder,
-                    CCFolder = this.CCFolder,
-                    DestinationForWhiteImages = this.DestinationForWhiteImages,
-                    ToPrintFolder = this.ToPrintFolder,
-                    MachineA = this.MachineA,
-                    MachineB = this.MachineB,
-                    MachineC = this.MachineC,
-                    MachineD = this.MachineD
-                };
-                this.Workstations[CurrentPcName] = myProfile;
-
-                // If NOT syncing folders across all PCs and diskConfig exists, keep the shared global folders untouched
-                // so other PCs are not affected by local folder edits on this PC
-                AppConfig payloadToWrite = new AppConfig
-                {
-                    CurrentVoyage = string.IsNullOrWhiteSpace(this.CurrentVoyage) ? "PO101126" : this.CurrentVoyage.Trim().ToUpperInvariant(),
-                    LastOrderId = this.LastOrderId,
-                    FolderSyncVersion = this.FolderSyncVersion,
-                    PrintedFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.PrintedFolder : diskConfig.PrintedFolder,
-                    OrdersFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.OrdersFolder : diskConfig.OrdersFolder,
-                    DownloadsFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.DownloadsFolder : diskConfig.DownloadsFolder,
-                    BorderedPrintsFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.BorderedPrintsFolder : diskConfig.BorderedPrintsFolder,
-                    PrintshopFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.PrintshopFolder : diskConfig.PrintshopFolder,
-                    HubAppCanvasFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.HubAppCanvasFolder : diskConfig.HubAppCanvasFolder,
-                    CopyrightFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.CopyrightFolder : diskConfig.CopyrightFolder,
-                    CCFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.CCFolder : diskConfig.CCFolder,
-                    DestinationForWhiteImages = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.DestinationForWhiteImages : diskConfig.DestinationForWhiteImages,
-                    ToPrintFolder = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.ToPrintFolder : diskConfig.ToPrintFolder,
-                    MachineA = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineA : diskConfig.MachineA,
-                    MachineB = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineB : diskConfig.MachineB,
-                    MachineC = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineC : diskConfig.MachineC,
-                    MachineD = (syncAllFoldersAcrossPcs || diskConfig == null) ? this.MachineD : diskConfig.MachineD,
-                    MediaSizes = this.MediaSizes,
-                    MediaSizeRules = this.MediaSizeRules,
-                    CustomTemplates = this.CustomTemplates,
-                    Workstations = this.Workstations
-                };
-
-                string json = JsonSerializer.Serialize(payloadToWrite, new JsonSerializerOptions { WriteIndented = true });
-                string combinedContent = payloadToWrite.CurrentVoyage + Environment.NewLine + json;
-
-                string? dir = Path.GetDirectoryName(masterFilePath);
-                if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
-
-                ClearHiddenAttributesForWrite(masterFilePath);
-                Program.SafeWriteAllText(masterFilePath, combinedContent);
-                ApplySuperHiddenAttributes(masterFilePath);
+                catch { }
             }
-            catch { }
         }
 
         // ========================================================================
@@ -463,45 +508,77 @@ namespace LabTools
         // ========================================================================
         public int AllocateNextOrderId(Func<int>? initialHistoryFallbackScanner = null)
         {
-            string masterFilePath = ResolveMasterFilePath(this.MasterSyncFolder);
-            int highestKnown = Math.Max(6000000, this.LastOrderId);
-
-            try
+            lock (syncLock)
             {
-                if (File.Exists(masterFilePath))
-                {
-                    string rawText = Program.SafeReadAllText(masterFilePath);
-                    int firstBrace = rawText.IndexOf('{');
-                    if (firstBrace >= 0)
-                    {
-                        var diskConfig = JsonSerializer.Deserialize<AppConfig>(rawText.Substring(firstBrace).Trim());
-                        if (diskConfig != null && diskConfig.LastOrderId > highestKnown)
-                        {
-                            highestKnown = diskConfig.LastOrderId;
-                        }
-                    }
-                }
-            }
-            catch { }
+                string masterFilePath = ResolveMasterFilePath(this.MasterSyncFolder);
+                string mutexName = @"Global\LabTools_OrderId_Mutex";
+                bool hasHandle = false;
+                Mutex? orderMutex = null;
 
-            // One-time bootstrap scan if LastOrderId hasn't been initialized from existing history yet
-            if (highestKnown <= 6000000 && initialHistoryFallbackScanner != null)
-            {
                 try
                 {
-                    int scannedMax = initialHistoryFallbackScanner();
-                    if (scannedMax > highestKnown && scannedMax <= 9999999)
-                        highestKnown = scannedMax;
+                    orderMutex = new Mutex(false, mutexName);
+                    try
+                    {
+                        hasHandle = orderMutex.WaitOne(3000);
+                    }
+                    catch (AbandonedMutexException)
+                    {
+                        hasHandle = true;
+                    }
                 }
                 catch { }
+
+                try
+                {
+                    int highestKnown = Math.Max(6000000, this.LastOrderId);
+
+                    try
+                    {
+                        if (File.Exists(masterFilePath))
+                        {
+                            string rawText = Program.SafeReadAllText(masterFilePath);
+                            int firstBrace = rawText.IndexOf('{');
+                            if (firstBrace >= 0)
+                            {
+                                var diskConfig = JsonSerializer.Deserialize<AppConfig>(rawText.Substring(firstBrace).Trim());
+                                if (diskConfig != null && diskConfig.LastOrderId > highestKnown)
+                                {
+                                    highestKnown = diskConfig.LastOrderId;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+
+                    // One-time bootstrap scan if LastOrderId hasn't been initialized from existing history yet
+                    if (highestKnown <= 6000000 && initialHistoryFallbackScanner != null)
+                    {
+                        try
+                        {
+                            int scannedMax = initialHistoryFallbackScanner();
+                            if (scannedMax > highestKnown && scannedMax <= 9999999)
+                                highestKnown = scannedMax;
+                        }
+                        catch { }
+                    }
+
+                    int nextId = highestKnown + 1;
+                    if (nextId > 9999999) nextId = 6000001;
+
+                    this.LastOrderId = nextId;
+                    Save(syncAllFoldersAcrossPcs: false);
+                    return nextId;
+                }
+                finally
+                {
+                    if (hasHandle && orderMutex != null)
+                    {
+                        try { orderMutex.ReleaseMutex(); } catch { }
+                    }
+                    orderMutex?.Dispose();
+                }
             }
-
-            int nextId = highestKnown + 1;
-            if (nextId > 9999999) nextId = 6000001;
-
-            this.LastOrderId = nextId;
-            Save(syncAllFoldersAcrossPcs: false);
-            return nextId;
         }
 
         public MediaSizeRule GetEffectiveRule(string sizeName)
