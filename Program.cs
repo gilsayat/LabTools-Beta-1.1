@@ -19,9 +19,9 @@ using System.Diagnostics;
 using System.Globalization;
   
 // ========================================================================  
-// LabTools v3.8 - Laboratory Workflow Automation System  
+// LabTools v3.9 - Laboratory Workflow Automation System  
 // Publisher: Gil Sayat (Stored in Application Metadata)  
-// ========================================================================  
+// ========================================================================
   
 namespace LabTools  
 {  
@@ -154,7 +154,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools v3.8";  
+        public const string AppTitle = "LabTools v3.9";  
   
         // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
@@ -1966,8 +1966,25 @@ namespace LabTools
         }
 
         // ========================================================================
-        // CHECK ORDER IDS (RECURSIVE SCAN + UNIFIED HISTORY FILE)
+        // CHECK ORDER IDS (CACHED + PARALLEL SINGLE-PASS SCAN + UNIFIED HISTORY)
         // ========================================================================
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime LastWriteUtc, string Cabin, string FullText)> orderTicketCache =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime, string, string)>(StringComparer.OrdinalIgnoreCase);
+
+        private static bool IsOrderFileInfoWithinCruiseWindow(FileInfo fi, DateTime? cutoffDateTime)
+        {
+            if (!cutoffDateTime.HasValue) return true;
+            try
+            {
+                DateTime fileTime = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
+                return fileTime >= cutoffDateTime.Value;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private async void CheckOrderIdsForCabin()
         {
             string targetCabin = txtSearch.Text.Trim();
@@ -2010,69 +2027,82 @@ namespace LabTools
                     var list = new List<CabinOrderInfo>();
                     var seenOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    var dirsToScan = new Stack<string>();
-                    dirsToScan.Push(ordersDir);
+                    // 1. Collect all valid .txt FileInfo objects using WIN32_FIND_DATA timestamps directly (no N+1 FileInfo calls)
+                    var candidateFiles = new List<FileInfo>();
+                    var dirsToScan = new Stack<DirectoryInfo>();
+                    dirsToScan.Push(new DirectoryInfo(ordersDir));
 
                     while (dirsToScan.Count > 0)
                     {
-                        string currentDir = dirsToScan.Pop();
+                        DirectoryInfo currentDir = dirsToScan.Pop();
 
-                        IEnumerable<string>? txtFiles = null;
-                        try { txtFiles = Directory.EnumerateFiles(currentDir, "*.txt"); } catch { }
+                        IEnumerable<FileInfo>? txtFiles = null;
+                        try { txtFiles = currentDir.EnumerateFiles("*.txt"); } catch { }
 
                         if (txtFiles != null)
                         {
-                            foreach (string txtFile in txtFiles)
+                            foreach (FileInfo fi in txtFiles)
                             {
-                                try
+                                if (IsOrderFileInfoWithinCruiseWindow(fi, cruiseCutoff))
                                 {
-                                    if (!IsOrderFileWithinCruiseWindow(txtFile, cruiseCutoff))
-                                        continue;
-
-                                    bool matchCabin = false;
-                                    using (var fs = new FileStream(txtFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-                                    using (var reader = new StreamReader(fs, Encoding.UTF8))
-                                    {
-                                        for (int i = 0; i < 25; i++)
-                                        {
-                                            string? line = reader.ReadLine();
-                                            if (line == null) break;
-                                            var cm = CabinMatchRegex.Match(line);
-                                            if (cm.Success && cm.Groups[1].Value.Trim().Equals(targetCabin, StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                matchCabin = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    if (matchCabin)
-                                    {
-                                        string orderId = Path.GetFileNameWithoutExtension(txtFile);
-                                        if (!seenOrderIds.Contains(orderId))
-                                        {
-                                            seenOrderIds.Add(orderId);
-                                            string fullText = File.ReadAllText(txtFile);
-                                            var orderInfo = ParseOrderFileContent(txtFile, orderId, targetCabin, fullText, printedDir);
-                                            list.Add(orderInfo);
-                                        }
-                                    }
+                                    candidateFiles.Add(fi);
                                 }
-                                catch { }
                             }
                         }
 
-                        IEnumerable<string>? subDirs = null;
-                        try { subDirs = Directory.EnumerateDirectories(currentDir); } catch { }
+                        IEnumerable<DirectoryInfo>? subDirs = null;
+                        try { subDirs = currentDir.EnumerateDirectories(); } catch { }
                         if (subDirs != null)
                         {
-                            foreach (string sd in subDirs)
+                            foreach (DirectoryInfo sd in subDirs)
                             {
                                 dirsToScan.Push(sd);
                             }
                         }
                     }
 
+                    // 2. Read uncached or modified .txt files in parallel (single-pass read per file)
+                    Parallel.ForEach(
+                        candidateFiles,
+                        new ParallelOptions { MaxDegreeOfParallelism = 8 },
+                        fi =>
+                        {
+                            try
+                            {
+                                string fullPath = fi.FullName;
+                                DateTime writeUtc = fi.LastWriteTimeUtc;
+
+                                if (!orderTicketCache.TryGetValue(fullPath, out var cached) || cached.LastWriteUtc != writeUtc)
+                                {
+                                    string fullText = Program.SafeReadAllText(fullPath);
+                                    var cm = CabinMatchRegex.Match(fullText);
+                                    string extractedCabin = cm.Success ? cm.Groups[1].Value.Trim() : string.Empty;
+                                    orderTicketCache[fullPath] = (writeUtc, extractedCabin, fullText);
+                                }
+                            }
+                            catch { }
+                        });
+
+                    // 3. Filter cached tickets for targetCabin and build CabinOrderInfo only for matches
+                    foreach (FileInfo fi in candidateFiles)
+                    {
+                        try
+                        {
+                            if (orderTicketCache.TryGetValue(fi.FullName, out var cached) &&
+                                cached.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase))
+                            {
+                                string orderId = Path.GetFileNameWithoutExtension(fi.Name);
+                                if (seenOrderIds.Add(orderId))
+                                {
+                                    var orderInfo = ParseOrderFileContent(fi.FullName, orderId, targetCabin, cached.FullText, printedDir);
+                                    list.Add(orderInfo);
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+
+                    // 4. Check Unified Voyage History records
                     try
                     {
                         var historyRecords = LoadVoyageHistoryRecords(currentVoyageName);
@@ -2084,9 +2114,8 @@ namespace LabTools
                                 if (rowDate < cruiseCutoff.Value) continue;
                             }
 
-                            if (rec.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) && !seenOrderIds.Contains(rec.OrderId))
+                            if (rec.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) && seenOrderIds.Add(rec.OrderId))
                             {
-                                seenOrderIds.Add(rec.OrderId);
                                 var info = new CabinOrderInfo
                                 {
                                     OrderId = rec.OrderId,
