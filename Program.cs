@@ -1176,7 +1176,7 @@ namespace LabTools
   
             lblOrderTypeTag = new Label() { Text = "Type:", Location = new Point(14, 117), AutoSize = true, Font = new Font("Segoe UI", 8.75f, FontStyle.Bold), Visible = true };
             cmbOrderType = new ComboBox() { Location = new Point(62, 114), Width = 286, Height = 24, DropDownStyle = ComboBoxStyle.DropDown, Font = new Font("Segoe UI", 8.75f) };  
-            cmbOrderType.Items.AddRange(new string[] { "Package", "Manual Order", "Express Order", "Online Order" });  
+            cmbOrderType.Items.AddRange(new string[] { "Manual Order", "Package", "Pre-Paid PKG", "Onboard PKG" });  
             cmbOrderType.Text = "Package";  
   
             // MASSIVE FULL-CARD-HEIGHT PRINT BUTTON ON THE RIGHT
