@@ -1,4 +1,3 @@
-
 using System;  
 using System.IO;
 using System.IO.Compression;
@@ -20,7 +19,7 @@ using System.Diagnostics;
 using System.Globalization;
   
 // ========================================================================  
-// LabTools v3.91 - Laboratory Workflow Automation System  
+// LabTools v3.92 - Laboratory Workflow Automation System  
 // Publisher: Gil Sayat (Stored in Application Metadata)  
 // ========================================================================  
   
@@ -155,7 +154,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools v3.91";  
+        public const string AppTitle = "LabTools v3.92";  
   
         // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
@@ -767,7 +766,6 @@ namespace LabTools
             try
             {
                 masterSyncWatcher?.Dispose();
-            ordersIndexWatcher?.Dispose();
                 string masterDir = AppConfig.ResolveMasterDirectoryPath(config.MasterSyncFolder);
                 string masterFile = Path.GetFileName(AppConfig.ResolveMasterFilePath(config.MasterSyncFolder));
                 if (!string.IsNullOrWhiteSpace(masterDir) && Directory.Exists(masterDir))
@@ -1970,7 +1968,7 @@ namespace LabTools
         }
 
         // ========================================================================
-        // CHECK ORDER IDS (ZERO-RESCAN IN-MEMORY ENGINE + YYYYMMDD FOLDER PRUNING + WATCHER)
+        // CHECK ORDER IDS (ZERO-RESCAN IN-MEMORY ENGINE + YYYYMMDD DIRECT RESOLVE + WATCHER)
         // ========================================================================
         private FileSystemWatcher? ordersIndexWatcher;
         private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long LastWriteUtcTicks, DateTime OrderDate, string Cabin, string OrderId, string FullPath)> orderCabinIndex =
@@ -1989,7 +1987,7 @@ namespace LabTools
         {
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LabTools");
             Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "order_cabin_index_v391.dat");
+            return Path.Combine(dir, "order_cabin_index_v392.dat");
         }
 
         private void EnsureLocalOrderIndexLoaded()
@@ -2010,7 +2008,10 @@ namespace LabTools
                         string fullPath = parts[0];
                         string cabin = parts[3];
                         string orderId = parts[4];
-                        orderCabinIndex[fullPath] = (writeTicks, new DateTime(orderDateTicks), cabin, orderId, fullPath);
+                        if (!string.IsNullOrEmpty(cabin))
+                        {
+                            orderCabinIndex[fullPath] = (writeTicks, new DateTime(orderDateTicks), cabin, orderId, fullPath);
+                        }
                     }
                 }
             }
@@ -2026,6 +2027,7 @@ namespace LabTools
                 foreach (var kvp in orderCabinIndex)
                 {
                     var v = kvp.Value;
+                    if (string.IsNullOrEmpty(v.Cabin)) continue;
                     sb.Append(v.FullPath).Append('\t')
                       .Append(v.LastWriteUtcTicks).Append('\t')
                       .Append(v.OrderDate.Ticks).Append('\t')
@@ -2087,7 +2089,7 @@ namespace LabTools
                 {
                     try
                     {
-                        await EnsureSessionOrderIndexReadyAsync(ordersDir, GetCurrentCruiseCutoffDateTime(), GetNetworkVoyage());
+                        await EnsureSessionOrderIndexReadyAsync(ordersDir, GetCurrentCruiseCutoffDateTime(), GetNetworkVoyage(), forceRefreshIfEmpty: false);
                     }
                     catch { }
                 });
@@ -2104,37 +2106,53 @@ namespace LabTools
                 DateTime orderDate = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
                 long writeTicks = fi.LastWriteTimeUtc.Ticks;
 
-                if (orderCabinIndex.TryGetValue(fullPath, out var existing) && existing.LastWriteUtcTicks == writeTicks)
+                if (orderCabinIndex.TryGetValue(fullPath, out var existing) &&
+                    existing.LastWriteUtcTicks == writeTicks &&
+                    !string.IsNullOrEmpty(existing.Cabin))
+                {
                     return;
+                }
 
                 string cabin = ExtractCabinFastFromHeader(fullPath);
-                string orderId = Path.GetFileNameWithoutExtension(fi.Name);
-                orderCabinIndex[fullPath] = (writeTicks, orderDate, cabin, orderId, fullPath);
-                parsedOrderDetailsCache.TryRemove(fullPath, out _);
+                if (!string.IsNullOrEmpty(cabin))
+                {
+                    string orderId = Path.GetFileNameWithoutExtension(fi.Name);
+                    orderCabinIndex[fullPath] = (writeTicks, orderDate, cabin, orderId, fullPath);
+                    parsedOrderDetailsCache.TryRemove(fullPath, out _);
+                }
             }
             catch { }
         }
 
         private static string ExtractCabinFastFromHeader(string txtFile)
         {
-            try
+            // Retry up to 3 times on transient SMB lock so we never cache an empty cabin
+            for (int attempt = 1; attempt <= 3; attempt++)
             {
-                using (var fs = new FileStream(txtFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1024, FileOptions.SequentialScan))
-                using (var reader = new StreamReader(fs, Encoding.UTF8, true, 1024))
+                try
                 {
-                    for (int i = 0; i < 20; i++)
+                    using (var fs = new FileStream(txtFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096))
+                    using (var reader = new StreamReader(fs, Encoding.UTF8))
                     {
-                        string? line = reader.ReadLine();
-                        if (line == null) break;
-                        if (line.IndexOf("Cabin", StringComparison.OrdinalIgnoreCase) >= 0)
+                        for (int i = 0; i < 25; i++)
                         {
+                            string? line = reader.ReadLine();
+                            if (line == null) break;
                             var cm = CabinMatchRegex.Match(line);
                             if (cm.Success) return cm.Groups[1].Value.Trim();
                         }
                     }
+                    return string.Empty;
+                }
+                catch (IOException) when (attempt < 3)
+                {
+                    Thread.Sleep(50);
+                }
+                catch
+                {
+                    return string.Empty;
                 }
             }
-            catch { }
             return string.Empty;
         }
 
@@ -2151,9 +2169,9 @@ namespace LabTools
                 return true;
             }
 
-            // Smart YYYYMMDD folder pruning (e.g., 20261108, 20261114):
-            // Immediately skips entire date folders from previous weeks/cruises without opening their order subfolders!
-            if (cruiseCutoff.HasValue && name.Length == 8 && int.TryParse(name, out _))
+            // Smart YYYYMMDD folder pruning ( ONLY when length == 8 and starts with "20", e.g., 20261108, 20261114 ):
+            // Never confuses 7-8 digit Order ID folders (e.g., 2206840) with dates!
+            if (cruiseCutoff.HasValue && name.Length == 8 && name.StartsWith("20", StringComparison.Ordinal))
             {
                 if (DateTime.TryParseExact(name, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime folderDate))
                 {
@@ -2165,12 +2183,12 @@ namespace LabTools
             return false;
         }
 
-        private async Task EnsureSessionOrderIndexReadyAsync(string ordersDir, DateTime? cruiseCutoff, string currentVoyage)
+        private async Task EnsureSessionOrderIndexReadyAsync(string ordersDir, DateTime? cruiseCutoff, string currentVoyage, bool forceRefreshIfEmpty)
         {
             EnsureLocalOrderIndexLoaded();
 
-            // FAST PATH: If we already indexed this session for the current cruise, FileSystemWatcher keeps it live (0 network folder scans!)
-            if (hasCompletedSessionOrderScan &&
+            if (!forceRefreshIfEmpty &&
+                hasCompletedSessionOrderScan &&
                 indexedOrdersRootPath.Equals(ordersDir, StringComparison.OrdinalIgnoreCase) &&
                 indexedCruiseVoyage.Equals(currentVoyage, StringComparison.OrdinalIgnoreCase))
             {
@@ -2180,7 +2198,8 @@ namespace LabTools
             await orderScanSemaphore.WaitAsync();
             try
             {
-                if (hasCompletedSessionOrderScan &&
+                if (!forceRefreshIfEmpty &&
+                    hasCompletedSessionOrderScan &&
                     indexedOrdersRootPath.Equals(ordersDir, StringComparison.OrdinalIgnoreCase) &&
                     indexedCruiseVoyage.Equals(currentVoyage, StringComparison.OrdinalIgnoreCase))
                 {
@@ -2198,10 +2217,14 @@ namespace LabTools
                     DirectoryInfo currentDir = dirsToScan.Pop();
                     string dirName = currentDir.Name;
 
-                    // FAST ORDER-FOLDER SHORTCUT:
-                    // In Pixels (e.g. ...\20261114\2212620\2212620.txt), 7-8 digit order folders only contain <FolderName>.txt
-                    // Skip listing subdirectories inside 7-8 digit order folders to cut SMB round-trips in half!
-                    bool isOrderLeafFolder = (dirName.Length == 7 || dirName.Length == 8) && int.TryParse(dirName, out _);
+                    // SUPER FAST PATH FOR YYYYMMDD DATE FOLDERS (e.g., 20261108, 20261114):
+                    // Inside a YYYYMMDD date folder, Pixels creates 1 subfolder per Order ID (e.g., 2206840\2206840.txt).
+                    // By reading currentDir.EnumerateDirectories() on the date folder, we already get all Order IDs
+                    // and their folder timestamps in a SINGLE SMB call — completely eliminating 1,500+ individual
+                    // subfolder EnumerateFiles("*.txt") and EnumerateDirectories() network round-trips!
+                    bool isDateFolder = dirName.Length == 8 &&
+                                        dirName.StartsWith("20", StringComparison.Ordinal) &&
+                                        DateTime.TryParseExact(dirName, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
 
                     IEnumerable<FileInfo>? txtFiles = null;
                     try { txtFiles = currentDir.EnumerateFiles("*.txt"); } catch { }
@@ -2218,40 +2241,65 @@ namespace LabTools
                             seenPaths.Add(fullPath);
                             long writeTicks = fi.LastWriteTimeUtc.Ticks;
 
-                            if (!orderCabinIndex.TryGetValue(fullPath, out var cached) || cached.LastWriteUtcTicks != writeTicks)
+                            if (!orderCabinIndex.TryGetValue(fullPath, out var cached) ||
+                                cached.LastWriteUtcTicks != writeTicks ||
+                                string.IsNullOrEmpty(cached.Cabin))
                             {
                                 uncachedFiles.Add((fullPath, Path.GetFileNameWithoutExtension(fi.Name), writeTicks, fileTime));
                             }
                         }
                     }
 
-                    if (!isOrderLeafFolder)
+                    IEnumerable<DirectoryInfo>? subDirs = null;
+                    try { subDirs = currentDir.EnumerateDirectories(); } catch { }
+                    if (subDirs != null)
                     {
-                        IEnumerable<DirectoryInfo>? subDirs = null;
-                        try { subDirs = currentDir.EnumerateDirectories(); } catch { }
-                        if (subDirs != null)
+                        foreach (DirectoryInfo sd in subDirs)
                         {
-                            foreach (DirectoryInfo sd in subDirs)
+                            string subName = sd.Name;
+
+                            // If we are inside a YYYYMMDD date folder and see a 7-8 digit order folder (e.g., 2206840),
+                            // resolve <OrderFolder>\<OrderID>.txt directly without enumerating inside the order folder!
+                            if (isDateFolder && (subName.Length == 7 || subName.Length == 8) && int.TryParse(subName, out _))
                             {
-                                if (!ShouldSkipSubfolderDuringOrderScan(sd, cruiseCutoff))
+                                DateTime dirTime = sd.CreationTime > sd.LastWriteTime ? sd.CreationTime : sd.LastWriteTime;
+                                if (cruiseCutoff.HasValue && dirTime < cruiseCutoff.Value)
+                                    continue;
+
+                                string directTxtPath = Path.Combine(sd.FullName, subName + ".txt");
+                                seenPaths.Add(directTxtPath);
+                                long writeTicks = sd.LastWriteTimeUtc.Ticks;
+
+                                if (!orderCabinIndex.TryGetValue(directTxtPath, out var cached) ||
+                                    cached.LastWriteUtcTicks != writeTicks ||
+                                    string.IsNullOrEmpty(cached.Cabin))
                                 {
-                                    dirsToScan.Push(sd);
+                                    uncachedFiles.Add((directTxtPath, subName, writeTicks, dirTime));
                                 }
+                                continue;
+                            }
+
+                            if (!ShouldSkipSubfolderDuringOrderScan(sd, cruiseCutoff))
+                            {
+                                dirsToScan.Push(sd);
                             }
                         }
                     }
                 }
 
-                // Read headers with gentle concurrency (4 threads max) to avoid SMB server lock contention
+                // Read uncached order headers sequentially or with low concurrency (2 threads) so SMB never drops reads
                 if (uncachedFiles.Count > 0)
                 {
                     Parallel.ForEach(
                         uncachedFiles,
-                        new ParallelOptions { MaxDegreeOfParallelism = 4 },
+                        new ParallelOptions { MaxDegreeOfParallelism = 2 },
                         item =>
                         {
                             string cabin = ExtractCabinFastFromHeader(item.FullPath);
-                            orderCabinIndex[item.FullPath] = (item.WriteTicks, item.OrderDate, cabin, item.OrderId, item.FullPath);
+                            if (!string.IsNullOrEmpty(cabin))
+                            {
+                                orderCabinIndex[item.FullPath] = (item.WriteTicks, item.OrderDate, cabin, item.OrderId, item.FullPath);
+                            }
                         });
                 }
 
@@ -2321,7 +2369,7 @@ namespace LabTools
                     var seenOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                     // 1. Ensure session index is ready (0 folder scans if already warmed up!)
-                    await EnsureSessionOrderIndexReadyAsync(ordersDir, cruiseCutoff, currentVoyageName);
+                    await EnsureSessionOrderIndexReadyAsync(ordersDir, cruiseCutoff, currentVoyageName, forceRefreshIfEmpty: false);
 
                     // 2. Filter in-memory index in < 1 millisecond
                     var matchingEntries = orderCabinIndex.Values
@@ -2329,6 +2377,18 @@ namespace LabTools
                                     (!cruiseCutoff.HasValue || v.OrderDate >= cruiseCutoff.Value))
                         .OrderByDescending(v => v.OrderId)
                         .ToList();
+
+                    // If 0 matches in memory (e.g., an order was just dropped milliseconds ago before FileSystemWatcher fired),
+                    // do a quick delta refresh to pick up any brand-new order folders
+                    if (matchingEntries.Count == 0)
+                    {
+                        await EnsureSessionOrderIndexReadyAsync(ordersDir, cruiseCutoff, currentVoyageName, forceRefreshIfEmpty: true);
+                        matchingEntries = orderCabinIndex.Values
+                            .Where(v => v.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) &&
+                                        (!cruiseCutoff.HasValue || v.OrderDate >= cruiseCutoff.Value))
+                            .OrderByDescending(v => v.OrderId)
+                            .ToList();
+                    }
 
                     // 3. Parse full order details ONLY for the 1-5 matching tickets (and cache the parsed result)
                     foreach (var entry in matchingEntries)
@@ -2339,11 +2399,17 @@ namespace LabTools
                             {
                                 if (!parsedOrderDetailsCache.TryGetValue(entry.FullPath, out CabinOrderInfo? orderInfo))
                                 {
-                                    string fullText = File.ReadAllText(entry.FullPath);
-                                    orderInfo = ParseOrderFileContent(entry.FullPath, entry.OrderId, targetCabin, fullText, printedDir);
-                                    parsedOrderDetailsCache[entry.FullPath] = orderInfo;
+                                    string fullText = Program.SafeReadAllText(entry.FullPath);
+                                    if (!string.IsNullOrEmpty(fullText))
+                                    {
+                                        orderInfo = ParseOrderFileContent(entry.FullPath, entry.OrderId, targetCabin, fullText, printedDir);
+                                        parsedOrderDetailsCache[entry.FullPath] = orderInfo;
+                                    }
                                 }
-                                list.Add(orderInfo);
+                                if (orderInfo != null)
+                                {
+                                    list.Add(orderInfo);
+                                }
                             }
                         }
                         catch { }
@@ -2401,11 +2467,11 @@ namespace LabTools
 
                 if (matchedOrders.Count > 0)
                 {
-                    SetStatus($"Found {matchedOrders.Count} order(s) for Cabin {targetCabin} in {sw.Elapsed.TotalSeconds:F2}s. Double-click an order to view photos.");
+                    SetStatus($"Found {matchedOrders.Count} order(s) for Cabin {targetCabin} in {sw.Elapsed.TotalSeconds:F2}s (Indexed: {orderCabinIndex.Count}). Double-click an order to view photos.");
                 }
                 else
                 {
-                    SetStatus($"No order tickets found for Cabin {targetCabin} in current cruise ({currentVoyageName}) [{sw.Elapsed.TotalSeconds:F2}s].");
+                    SetStatus($"No order tickets found for Cabin {targetCabin} in current cruise ({currentVoyageName}) [{sw.Elapsed.TotalSeconds:F2}s | Indexed: {orderCabinIndex.Count}].");
                     MessageBox.Show($"No orders matching Cabin '{targetCabin}' (since {currentVoyageName} 12:00 PM start) were found in:\n{ordersDir}", "No Orders Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
@@ -4477,6 +4543,7 @@ namespace LabTools
             printshopWatcher?.Dispose();
             hubCanvasWatcher?.Dispose();
             masterSyncWatcher?.Dispose();
+            ordersIndexWatcher?.Dispose();
             watcherDebounceTimer?.Dispose();
             flashTimer?.Dispose();
             picLogo?.Image?.Dispose();
