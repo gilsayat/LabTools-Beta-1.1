@@ -1,3 +1,4 @@
+
 using System;  
 using System.IO;
 using System.IO.Compression;
@@ -19,7 +20,7 @@ using System.Diagnostics;
 using System.Globalization;
   
 // ========================================================================  
-// LabTools v3.9 - Laboratory Workflow Automation System  
+// LabTools v3.91 - Laboratory Workflow Automation System  
 // Publisher: Gil Sayat (Stored in Application Metadata)  
 // ========================================================================  
   
@@ -154,7 +155,7 @@ namespace LabTools
     {  
 #pragma warning disable CS8618  
         public const string Publisher = "Gil Sayat";  
-        public const string AppTitle = "LabTools v3.9";  
+        public const string AppTitle = "LabTools v3.91";  
   
         // Pre-compiled Regex for massive search speed improvements  
         private static readonly Regex OrderSearchRegex = new Regex(@"^\d{7,8}$", RegexOptions.Compiled);  
@@ -758,7 +759,7 @@ namespace LabTools
             UpdateNextCanvasNumber();  
             CheckMachineHealthAsync();  
             CheckLatestDownloadOrder();
-            StartBackgroundOrderIndexWarmup();  
+            SetupOrdersIndexWatcher();  
         }
 
         private void SetupMasterSyncWatcher()
@@ -766,6 +767,7 @@ namespace LabTools
             try
             {
                 masterSyncWatcher?.Dispose();
+            ordersIndexWatcher?.Dispose();
                 string masterDir = AppConfig.ResolveMasterDirectoryPath(config.MasterSyncFolder);
                 string masterFile = Path.GetFileName(AppConfig.ResolveMasterFilePath(config.MasterSyncFolder));
                 if (!string.IsNullOrWhiteSpace(masterDir) && Directory.Exists(masterDir))
@@ -830,6 +832,7 @@ namespace LabTools
                     SetupFolderWatcher();
                     SetupPrintshopWatcher();
                     SetupHubCanvasWatcher();
+                    SetupOrdersIndexWatcher();
                     RefreshHubCanvasOrdersList();
                     UpdateNextCanvasNumber();
                     CheckMachineHealthAsync();
@@ -1967,19 +1970,26 @@ namespace LabTools
         }
 
         // ========================================================================
-        // CHECK ORDER IDS (PERSISTENT LOCAL CACHE + 512B HEADER SCAN + ZERO SMB STAT)
+        // CHECK ORDER IDS (ZERO-RESCAN IN-MEMORY ENGINE + YYYYMMDD FOLDER PRUNING + WATCHER)
         // ========================================================================
-        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long LastWriteUtcTicks, string Cabin)> orderCabinIndex =
-            new System.Collections.Concurrent.ConcurrentDictionary<string, (long, string)>(StringComparer.OrdinalIgnoreCase);
+        private FileSystemWatcher? ordersIndexWatcher;
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (long LastWriteUtcTicks, DateTime OrderDate, string Cabin, string OrderId, string FullPath)> orderCabinIndex =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, (long, DateTime, string, string, string)>(StringComparer.OrdinalIgnoreCase);
+
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CabinOrderInfo> parsedOrderDetailsCache =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, CabinOrderInfo>(StringComparer.OrdinalIgnoreCase);
 
         private volatile bool isOrderIndexLoadedFromDisk = false;
+        private volatile bool hasCompletedSessionOrderScan = false;
+        private string indexedOrdersRootPath = "";
+        private string indexedCruiseVoyage = "";
         private readonly SemaphoreSlim orderScanSemaphore = new SemaphoreSlim(1, 1);
 
         private static string GetLocalOrderIndexCachePath()
         {
             string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LabTools");
             Directory.CreateDirectory(dir);
-            return Path.Combine(dir, "order_cabin_index_v39.dat");
+            return Path.Combine(dir, "order_cabin_index_v391.dat");
         }
 
         private void EnsureLocalOrderIndexLoaded()
@@ -1993,9 +2003,14 @@ namespace LabTools
                 foreach (string line in File.ReadAllLines(cachePath, Encoding.UTF8))
                 {
                     string[] parts = line.Split('\t');
-                    if (parts.Length >= 3 && long.TryParse(parts[1], out long ticks))
+                    if (parts.Length >= 5 &&
+                        long.TryParse(parts[1], out long writeTicks) &&
+                        long.TryParse(parts[2], out long orderDateTicks))
                     {
-                        orderCabinIndex[parts[0]] = (ticks, parts[2]);
+                        string fullPath = parts[0];
+                        string cabin = parts[3];
+                        string orderId = parts[4];
+                        orderCabinIndex[fullPath] = (writeTicks, new DateTime(orderDateTicks), cabin, orderId, fullPath);
                     }
                 }
             }
@@ -2007,14 +2022,95 @@ namespace LabTools
             try
             {
                 string cachePath = GetLocalOrderIndexCachePath();
-                var sb = new StringBuilder(orderCabinIndex.Count * 64);
+                var sb = new StringBuilder(orderCabinIndex.Count * 80);
                 foreach (var kvp in orderCabinIndex)
                 {
-                    sb.Append(kvp.Key).Append('\t')
-                      .Append(kvp.Value.LastWriteUtcTicks).Append('\t')
-                      .Append(kvp.Value.Cabin).AppendLine();
+                    var v = kvp.Value;
+                    sb.Append(v.FullPath).Append('\t')
+                      .Append(v.LastWriteUtcTicks).Append('\t')
+                      .Append(v.OrderDate.Ticks).Append('\t')
+                      .Append(v.Cabin).Append('\t')
+                      .Append(v.OrderId).AppendLine();
                 }
                 File.WriteAllText(cachePath, sb.ToString(), Encoding.UTF8);
+            }
+            catch { }
+        }
+
+        private void SetupOrdersIndexWatcher()
+        {
+            try
+            {
+                ordersIndexWatcher?.Dispose();
+                string ordersDir = !string.IsNullOrWhiteSpace(config.OrdersFolder) ? config.OrdersFolder : @"Z:\PixelsOrder\Processed";
+                if (!Directory.Exists(ordersDir)) return;
+
+                ordersIndexWatcher = new FileSystemWatcher(ordersDir, "*.txt")
+                {
+                    IncludeSubdirectories = true,
+                    InternalBufferSize = 65536,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime
+                };
+
+                FileSystemEventHandler onCreatedOrChanged = (s, e) =>
+                {
+                    if (string.IsNullOrEmpty(e.FullPath)) return;
+                    _ = Task.Run(() => IndexSingleOrderTicketFile(e.FullPath));
+                };
+
+                ordersIndexWatcher.Created += onCreatedOrChanged;
+                ordersIndexWatcher.Changed += onCreatedOrChanged;
+                ordersIndexWatcher.Renamed += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.OldFullPath))
+                    {
+                        orderCabinIndex.TryRemove(e.OldFullPath, out _);
+                        parsedOrderDetailsCache.TryRemove(e.OldFullPath, out _);
+                    }
+                    if (!string.IsNullOrEmpty(e.FullPath))
+                    {
+                        _ = Task.Run(() => IndexSingleOrderTicketFile(e.FullPath));
+                    }
+                };
+                ordersIndexWatcher.Deleted += (s, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.FullPath))
+                    {
+                        orderCabinIndex.TryRemove(e.FullPath, out _);
+                        parsedOrderDetailsCache.TryRemove(e.FullPath, out _);
+                    }
+                };
+                ordersIndexWatcher.EnableRaisingEvents = true;
+
+                // Start background one-time index warmup without blocking UI
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await EnsureSessionOrderIndexReadyAsync(ordersDir, GetCurrentCruiseCutoffDateTime(), GetNetworkVoyage());
+                    }
+                    catch { }
+                });
+            }
+            catch { }
+        }
+
+        private void IndexSingleOrderTicketFile(string fullPath)
+        {
+            try
+            {
+                var fi = new FileInfo(fullPath);
+                if (!fi.Exists) return;
+                DateTime orderDate = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
+                long writeTicks = fi.LastWriteTimeUtc.Ticks;
+
+                if (orderCabinIndex.TryGetValue(fullPath, out var existing) && existing.LastWriteUtcTicks == writeTicks)
+                    return;
+
+                string cabin = ExtractCabinFastFromHeader(fullPath);
+                string orderId = Path.GetFileNameWithoutExtension(fi.Name);
+                orderCabinIndex[fullPath] = (writeTicks, orderDate, cabin, orderId, fullPath);
+                parsedOrderDetailsCache.TryRemove(fullPath, out _);
             }
             catch { }
         }
@@ -2042,32 +2138,57 @@ namespace LabTools
             return string.Empty;
         }
 
-        private void StartBackgroundOrderIndexWarmup()
+        private static bool ShouldSkipSubfolderDuringOrderScan(DirectoryInfo sd, DateTime? cruiseCutoff)
         {
-            _ = Task.Run(async () =>
+            string name = sd.Name;
+            if (name.Equals("Downloads", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Printed", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Prints", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Printshop", StringComparison.OrdinalIgnoreCase) ||
+                name.Equals("Done", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("$", StringComparison.OrdinalIgnoreCase))
             {
-                try
+                return true;
+            }
+
+            // Smart YYYYMMDD folder pruning (e.g., 20261108, 20261114):
+            // Immediately skips entire date folders from previous weeks/cruises without opening their order subfolders!
+            if (cruiseCutoff.HasValue && name.Length == 8 && int.TryParse(name, out _))
+            {
+                if (DateTime.TryParseExact(name, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime folderDate))
                 {
-                    EnsureLocalOrderIndexLoaded();
-                    string ordersDir = !string.IsNullOrWhiteSpace(config.OrdersFolder) ? config.OrdersFolder : @"Z:\PixelsOrder\Processed";
-                    if (Directory.Exists(ordersDir))
-                    {
-                        await RefreshOrderCabinIndexAsync(ordersDir, GetCurrentCruiseCutoffDateTime());
-                    }
-                    LoadVoyageHistoryRecords(GetNetworkVoyage());
+                    if (folderDate.Date < cruiseCutoff.Value.Date)
+                        return true;
                 }
-                catch { }
-            });
+            }
+
+            return false;
         }
 
-        private async Task<List<FileInfo>> RefreshOrderCabinIndexAsync(string ordersDir, DateTime? cruiseCutoff)
+        private async Task EnsureSessionOrderIndexReadyAsync(string ordersDir, DateTime? cruiseCutoff, string currentVoyage)
         {
+            EnsureLocalOrderIndexLoaded();
+
+            // FAST PATH: If we already indexed this session for the current cruise, FileSystemWatcher keeps it live (0 network folder scans!)
+            if (hasCompletedSessionOrderScan &&
+                indexedOrdersRootPath.Equals(ordersDir, StringComparison.OrdinalIgnoreCase) &&
+                indexedCruiseVoyage.Equals(currentVoyage, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             await orderScanSemaphore.WaitAsync();
             try
             {
-                EnsureLocalOrderIndexLoaded();
-                var validFiles = new List<FileInfo>(1024);
-                var uncachedFiles = new List<FileInfo>();
+                if (hasCompletedSessionOrderScan &&
+                    indexedOrdersRootPath.Equals(ordersDir, StringComparison.OrdinalIgnoreCase) &&
+                    indexedCruiseVoyage.Equals(currentVoyage, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                var uncachedFiles = new List<(string FullPath, string OrderId, long WriteTicks, DateTime OrderDate)>();
+                var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
                 var dirsToScan = new Stack<DirectoryInfo>();
                 dirsToScan.Push(new DirectoryInfo(ordersDir));
@@ -2075,6 +2196,12 @@ namespace LabTools
                 while (dirsToScan.Count > 0)
                 {
                     DirectoryInfo currentDir = dirsToScan.Pop();
+                    string dirName = currentDir.Name;
+
+                    // FAST ORDER-FOLDER SHORTCUT:
+                    // In Pixels (e.g. ...\20261114\2212620\2212620.txt), 7-8 digit order folders only contain <FolderName>.txt
+                    // Skip listing subdirectories inside 7-8 digit order folders to cut SMB round-trips in half!
+                    bool isOrderLeafFolder = (dirName.Length == 7 || dirName.Length == 8) && int.TryParse(dirName, out _);
 
                     IEnumerable<FileInfo>? txtFiles = null;
                     try { txtFiles = currentDir.EnumerateFiles("*.txt"); } catch { }
@@ -2083,66 +2210,66 @@ namespace LabTools
                     {
                         foreach (FileInfo fi in txtFiles)
                         {
-                            if (cruiseCutoff.HasValue)
-                            {
-                                DateTime fileTime = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
-                                if (fileTime < cruiseCutoff.Value) continue;
-                            }
+                            DateTime fileTime = fi.CreationTime > fi.LastWriteTime ? fi.CreationTime : fi.LastWriteTime;
+                            if (cruiseCutoff.HasValue && fileTime < cruiseCutoff.Value)
+                                continue;
 
-                            validFiles.Add(fi);
+                            string fullPath = fi.FullName;
+                            seenPaths.Add(fullPath);
                             long writeTicks = fi.LastWriteTimeUtc.Ticks;
-                            if (!orderCabinIndex.TryGetValue(fi.FullName, out var cached) || cached.LastWriteUtcTicks != writeTicks)
+
+                            if (!orderCabinIndex.TryGetValue(fullPath, out var cached) || cached.LastWriteUtcTicks != writeTicks)
                             {
-                                uncachedFiles.Add(fi);
+                                uncachedFiles.Add((fullPath, Path.GetFileNameWithoutExtension(fi.Name), writeTicks, fileTime));
                             }
                         }
                     }
 
-                    IEnumerable<DirectoryInfo>? subDirs = null;
-                    try { subDirs = currentDir.EnumerateDirectories(); } catch { }
-                    if (subDirs != null)
+                    if (!isOrderLeafFolder)
                     {
-                        foreach (DirectoryInfo sd in subDirs)
+                        IEnumerable<DirectoryInfo>? subDirs = null;
+                        try { subDirs = currentDir.EnumerateDirectories(); } catch { }
+                        if (subDirs != null)
                         {
-                            string name = sd.Name;
-                            if (name.Equals("Downloads", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Printed", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Prints", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Printshop", StringComparison.OrdinalIgnoreCase) ||
-                                name.Equals("Done", StringComparison.OrdinalIgnoreCase) ||
-                                name.StartsWith("$", StringComparison.OrdinalIgnoreCase))
+                            foreach (DirectoryInfo sd in subDirs)
                             {
-                                continue;
+                                if (!ShouldSkipSubfolderDuringOrderScan(sd, cruiseCutoff))
+                                {
+                                    dirsToScan.Push(sd);
+                                }
                             }
-                            dirsToScan.Push(sd);
                         }
                     }
                 }
 
+                // Read headers with gentle concurrency (4 threads max) to avoid SMB server lock contention
                 if (uncachedFiles.Count > 0)
                 {
                     Parallel.ForEach(
                         uncachedFiles,
-                        new ParallelOptions { MaxDegreeOfParallelism = 12 },
-                        fi =>
+                        new ParallelOptions { MaxDegreeOfParallelism = 4 },
+                        item =>
                         {
-                            string cabin = ExtractCabinFastFromHeader(fi.FullName);
-                            orderCabinIndex[fi.FullName] = (fi.LastWriteTimeUtc.Ticks, cabin);
+                            string cabin = ExtractCabinFastFromHeader(item.FullPath);
+                            orderCabinIndex[item.FullPath] = (item.WriteTicks, item.OrderDate, cabin, item.OrderId, item.FullPath);
                         });
-
-                    if (orderCabinIndex.Count > validFiles.Count + 500)
-                    {
-                        var activeSet = new HashSet<string>(validFiles.Select(f => f.FullName), StringComparer.OrdinalIgnoreCase);
-                        foreach (string key in orderCabinIndex.Keys)
-                        {
-                            if (!activeSet.Contains(key)) orderCabinIndex.TryRemove(key, out _);
-                        }
-                    }
-
-                    _ = Task.Run(SaveLocalOrderIndexToDisk);
                 }
 
-                return validFiles;
+                // Prune any stale/deleted entries from previous cruises
+                foreach (string key in orderCabinIndex.Keys.ToList())
+                {
+                    if (!seenPaths.Contains(key))
+                    {
+                        orderCabinIndex.TryRemove(key, out _);
+                        parsedOrderDetailsCache.TryRemove(key, out _);
+                    }
+                }
+
+                indexedOrdersRootPath = ordersDir;
+                indexedCruiseVoyage = currentVoyage;
+                hasCompletedSessionOrderScan = true;
+
+                _ = Task.Run(SaveLocalOrderIndexToDisk);
             }
             finally
             {
@@ -2176,6 +2303,7 @@ namespace LabTools
 
             DateTime? cruiseCutoff = GetCurrentCruiseCutoffDateTime();
             string currentVoyageName = GetNetworkVoyage();
+            var sw = Stopwatch.StartNew();
 
             btnFind.Enabled = false;
             progressBar.Visible = true;
@@ -2183,7 +2311,7 @@ namespace LabTools
             cardCabinOrders.Title = "SEARCHING ORDERS...";
             cardCabinOrders.Invalidate();
             lstCabinOrders.Items.Clear();
-            SetStatus("Scanning Orders folder and all subfolders for Cabin " + targetCabin + "...");
+            SetStatus("Checking orders for Cabin " + targetCabin + "...");
 
             try
             {
@@ -2192,27 +2320,36 @@ namespace LabTools
                     var list = new List<CabinOrderInfo>();
                     var seenOrderIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                    List<FileInfo> validFiles = await RefreshOrderCabinIndexAsync(ordersDir, cruiseCutoff);
+                    // 1. Ensure session index is ready (0 folder scans if already warmed up!)
+                    await EnsureSessionOrderIndexReadyAsync(ordersDir, cruiseCutoff, currentVoyageName);
 
-                    foreach (FileInfo fi in validFiles)
+                    // 2. Filter in-memory index in < 1 millisecond
+                    var matchingEntries = orderCabinIndex.Values
+                        .Where(v => v.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase) &&
+                                    (!cruiseCutoff.HasValue || v.OrderDate >= cruiseCutoff.Value))
+                        .OrderByDescending(v => v.OrderId)
+                        .ToList();
+
+                    // 3. Parse full order details ONLY for the 1-5 matching tickets (and cache the parsed result)
+                    foreach (var entry in matchingEntries)
                     {
                         try
                         {
-                            if (orderCabinIndex.TryGetValue(fi.FullName, out var cached) &&
-                                cached.Cabin.Equals(targetCabin, StringComparison.OrdinalIgnoreCase))
+                            if (seenOrderIds.Add(entry.OrderId))
                             {
-                                string orderId = Path.GetFileNameWithoutExtension(fi.Name);
-                                if (seenOrderIds.Add(orderId))
+                                if (!parsedOrderDetailsCache.TryGetValue(entry.FullPath, out CabinOrderInfo? orderInfo))
                                 {
-                                    string fullText = File.ReadAllText(fi.FullName);
-                                    var orderInfo = ParseOrderFileContent(fi.FullName, orderId, targetCabin, fullText, printedDir);
-                                    list.Add(orderInfo);
+                                    string fullText = File.ReadAllText(entry.FullPath);
+                                    orderInfo = ParseOrderFileContent(entry.FullPath, entry.OrderId, targetCabin, fullText, printedDir);
+                                    parsedOrderDetailsCache[entry.FullPath] = orderInfo;
                                 }
+                                list.Add(orderInfo);
                             }
                         }
                         catch { }
                     }
 
+                    // 4. Merge with cached Unified Voyage History (Zero File.Exists calls on Z:\Printed)
                     try
                     {
                         var historyRecords = LoadVoyageHistoryRecords(currentVoyageName);
@@ -2250,6 +2387,7 @@ namespace LabTools
                     return list.OrderByDescending(o => o.OrderId).ToList();
                 });
 
+                sw.Stop();
                 lstCabinOrders.BeginUpdate();
                 lstCabinOrders.Items.Clear();
                 foreach (var order in matchedOrders)
@@ -2263,11 +2401,11 @@ namespace LabTools
 
                 if (matchedOrders.Count > 0)
                 {
-                    SetStatus($"Found {matchedOrders.Count} order(s) for Cabin {targetCabin}. Double-click an order to view photos.");
+                    SetStatus($"Found {matchedOrders.Count} order(s) for Cabin {targetCabin} in {sw.Elapsed.TotalSeconds:F2}s. Double-click an order to view photos.");
                 }
                 else
                 {
-                    SetStatus($"No order tickets found for Cabin {targetCabin} in current cruise ({currentVoyageName}).");
+                    SetStatus($"No order tickets found for Cabin {targetCabin} in current cruise ({currentVoyageName}) [{sw.Elapsed.TotalSeconds:F2}s].");
                     MessageBox.Show($"No orders matching Cabin '{targetCabin}' (since {currentVoyageName} 12:00 PM start) were found in:\n{ordersDir}", "No Orders Found", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
             }
