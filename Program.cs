@@ -191,11 +191,18 @@ namespace LabTools
   
         private readonly Color[] logoStripeColors = new Color[]  
         {  
-            Color.FromArgb(128, 130, 133), Color.FromArgb(0, 188, 212),  
-            Color.FromArgb(0, 114, 206), Color.FromArgb(0, 47, 108),  
-            Color.FromArgb(67, 176, 42), Color.FromArgb(243, 146, 0),  
-            Color.FromArgb(227, 27, 35)  
+            Color.FromArgb(128, 130, 133), // #808285 Gray
+            Color.FromArgb(0, 166, 206),   // #00A6CE Cyan
+            Color.FromArgb(0, 118, 186),   // #0076BA Medium Blue
+            Color.FromArgb(0, 66, 138),    // #00428A Deep Blue
+            Color.FromArgb(72, 176, 75),   // #48B04B Green
+            Color.FromArgb(244, 173, 51),  // #F4AD33 Amber
+            Color.FromArgb(227, 27, 123)   // #E31B7B Magenta
         };  
+
+        private System.Windows.Forms.Timer? logoAnimTimer;
+        private float logoAnimPhase = 0f;
+        private bool isShowingIdleLogo = true;  
   
         private static readonly HashSet<string> ImageExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)   
         { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp" };  
@@ -929,46 +936,60 @@ namespace LabTools
         {  
             if (appIcon == null)  
             {  
-                using (Bitmap bmp = new Bitmap(128, 128))  
-                {  
-                    using (Graphics g = Graphics.FromImage(bmp))  
+                try
+                {
+                    // Reads the icon embedded inside LabTools.exe — never writes an external .ico file
+                    appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+                }
+                catch { }
+
+                if (appIcon != null)
+                {
+                    try
+                    {
+                        using (Bitmap raw = appIcon.ToBitmap())
+                        {
+                            smallTitleIconBmp = new Bitmap(raw, new Size(20, 20));
+                        }
+                    }
+                    catch { }
+                }
+                else
+                {
+                    using (Bitmap bmp = new Bitmap(128, 128))  
                     {  
-                        g.Clear(Color.FromArgb(24, 25, 29));   
-                        g.SmoothingMode = SmoothingMode.AntiAlias;  
-                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  
-  
-                        using (Font fontPixels = new Font("Segoe UI", 28, FontStyle.Bold))  
+                        using (Graphics g = Graphics.FromImage(bmp))  
                         {  
-                            SizeF textSize = g.MeasureString("pixels", fontPixels);  
-                            g.DrawString("pixels", fontPixels, Brushes.White, new PointF((128 - textSize.Width) / 2, 25));  
-                        }  
+                            g.Clear(Color.FromArgb(18, 19, 22));   
+                            g.SmoothingMode = SmoothingMode.AntiAlias;  
+                            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  
   
-                        int segWidth = 16, segHeight = 8;  
-                        int totalWidth = logoStripeColors.Length * segWidth;  
-                        int barX = (128 - totalWidth) / 2, barY = 75;  
-  
-                        for (int i = 0; i < logoStripeColors.Length; i++)  
-                        {  
-                            using (Brush b = new SolidBrush(logoStripeColors[i]))  
+                            using (Font fontPixels = new Font("Segoe UI", 28, FontStyle.Bold))  
                             {  
-                                g.FillRectangle(b, barX + (i * segWidth), barY, segWidth, segHeight);  
+                                SizeF textSize = g.MeasureString("pixels", fontPixels);  
+                                g.DrawString("pixels", fontPixels, Brushes.White, new PointF((128 - textSize.Width) / 2, 25));  
+                            }  
+  
+                            int segWidth = 16, segHeight = 8;  
+                            int totalWidth = logoStripeColors.Length * segWidth;  
+                            int barX = (128 - totalWidth) / 2, barY = 75;  
+  
+                            for (int i = 0; i < logoStripeColors.Length; i++)  
+                            {  
+                                using (Brush b = new SolidBrush(logoStripeColors[i]))  
+                                {  
+                                    g.FillRectangle(b, barX + (i * segWidth), barY, segWidth, segHeight);  
+                                }  
                             }  
                         }  
-                    }  
-                    smallTitleIconBmp = new Bitmap(bmp, new Size(20, 20));
-                    IntPtr hIcon = bmp.GetHicon();  
-                    appIcon = (Icon)Icon.FromHandle(hIcon).Clone();  
-                    DestroyIcon(hIcon);  
-                }  
-  
-                try  
-                {  
-                    if (!File.Exists("labtools_icon.ico") && appIcon != null)  
-                        using (var fs = new FileStream("labtools_icon.ico", FileMode.Create)) { appIcon.Save(fs); }  
-                }  
-                catch { }  
+                        smallTitleIconBmp = new Bitmap(bmp, new Size(20, 20));
+                        IntPtr hIcon = bmp.GetHicon();  
+                        appIcon = (Icon)Icon.FromHandle(hIcon).Clone();  
+                        DestroyIcon(hIcon);  
+                    }
+                }
             }  
-            this.Icon = appIcon;  
+            if (appIcon != null) this.Icon = appIcon;  
         }  
   
         // ========================================================================  
@@ -1279,7 +1300,7 @@ namespace LabTools
             // ========================================================================
             // R1: LIVE PREVIEW CARD (Y=90, Height=238)
             cardPreview = new RoundedCardPanel() { Location = new Point(612, 90), Size = new Size(314, 238), Title = "LIVE PREVIEW" };
-            picLogo = new PictureBox() { Location = new Point(17, 28), Width = 280, Height = 198, BackColor = Color.FromArgb(24, 25, 29), SizeMode = PictureBoxSizeMode.Zoom };  
+            picLogo = new PictureBox() { Location = new Point(17, 28), Width = 280, Height = 198, BackColor = Color.FromArgb(18, 19, 22), SizeMode = PictureBoxSizeMode.Zoom };  
             ResetLogoPreview();  
             cardPreview.Controls.Add(picLogo);
             this.Controls.Add(cardPreview);
@@ -3614,6 +3635,9 @@ namespace LabTools
 
             try
             {
+                isShowingIdleLogo = false;
+                logoAnimTimer?.Stop();
+
                 byte[] fileBytes = File.ReadAllBytes(fullPath);
                 using (var ms = new MemoryStream(fileBytes))
                 using (var originalImg = Image.FromStream(ms))
@@ -3621,7 +3645,7 @@ namespace LabTools
                     Bitmap thumb = new Bitmap(280, 198);
                     using (Graphics g = Graphics.FromImage(thumb))
                     {
-                        g.Clear(Color.FromArgb(24, 25, 29));
+                        g.Clear(Color.FromArgb(18, 19, 22));
                         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                         g.PixelOffsetMode = PixelOffsetMode.HighQuality;
                         g.SmoothingMode = SmoothingMode.HighQuality;
@@ -3648,25 +3672,130 @@ namespace LabTools
   
         private void ResetLogoPreview()  
         {  
-            Bitmap logoBmp = new Bitmap(280, 198);  
+            isShowingIdleLogo = true;
+
+            if (logoAnimTimer == null)
+            {
+                logoAnimTimer = new System.Windows.Forms.Timer { Interval = 25 };
+                logoAnimTimer.Tick += (s, e) =>
+                {
+                    if (!isShowingIdleLogo || IsDisposed || !IsHandleCreated) return;
+                    // 2.1875s cycle = 1.6x speed
+                    logoAnimPhase = (logoAnimPhase + (0.025f / 2.1875f)) % 1.0f;
+                    RenderIdleLogoFrame();
+                };
+            }
+
+            RenderIdleLogoFrame();
+            if (!logoAnimTimer.Enabled) logoAnimTimer.Start();
+        }
+
+        private void RenderIdleLogoFrame()
+        {
+            int w = Math.Max(280, picLogo.Width);
+            int h = Math.Max(198, picLogo.Height);
+            Bitmap logoBmp = new Bitmap(w, h);  
+
             using (Graphics g = Graphics.FromImage(logoBmp))  
             {  
-                g.Clear(Color.FromArgb(24, 25, 29));  
+                g.Clear(Color.FromArgb(18, 19, 22));  
                 g.SmoothingMode = SmoothingMode.AntiAlias;  
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;  
-  
-                using (Font fontPixels = new Font("Segoe UI", 32, FontStyle.Bold))  
-                    g.DrawString("pixels", fontPixels, Brushes.White, new PointF(30, 34));  
-  
-                int barX = 32, barY = 94, segWidth = 30, segHeight = 9;  
-                for (int i = 0; i < logoStripeColors.Length; i++)  
-                {  
-                    using (Brush b = new SolidBrush(logoStripeColors[i]))  
-                        g.FillRectangle(b, barX + (i * segWidth), barY, segWidth, segHeight);  
-                }  
-  
-                using (Font fontSub = new Font("Segoe UI", 13.5f, FontStyle.Bold))  
-                    g.DrawString("LAB TECHNICIAN", fontSub, Brushes.White, new PointF(32, 112));  
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;  
+
+                // 1. Four Breathing Corner Viewfinder Brackets (1.6x speed)
+                float wave = 0.5f - 0.5f * (float)Math.Cos(logoAnimPhase * 2.0 * Math.PI);
+                float inset = 16f - (wave * 3.5f);
+                int alpha = (int)(115 + wave * 125);
+
+                using (Pen bracketPen = new Pen(Color.FromArgb(alpha, 138, 147, 162), 2f))
+                {
+                    float arm = 18f;
+                    float x0 = inset, y0 = inset;
+                    float x1 = w - inset, y1 = h - inset;
+
+                    g.DrawLine(bracketPen, x0, y0 + arm, x0, y0);
+                    g.DrawLine(bracketPen, x0, y0, x0 + arm, y0);
+
+                    g.DrawLine(bracketPen, x1 - arm, y0, x1, y0);
+                    g.DrawLine(bracketPen, x1, y0, x1, y0 + arm);
+
+                    g.DrawLine(bracketPen, x0, y1 - arm, x0, y1);
+                    g.DrawLine(bracketPen, x0, y1, x0 + arm, y1);
+
+                    g.DrawLine(bracketPen, x1 - arm, y1, x1, y1);
+                    g.DrawLine(bracketPen, x1, y1, x1, y1 - arm);
+                }
+
+                // Centered pixels PHOTOLAB geometry
+                float logoWidth = 216f;
+                float startX = (w - logoWidth) / 2f;
+                float centerY = h / 2f;
+
+                float pX = startX + 2f;
+                float wordTopY = centerY - 60f;
+                float barY = centerY + 6f;
+                float barH = 18f;
+                float barX = pX + 14f;
+                float barTotalW = logoWidth - 16f;
+                float barRightX = barX + barTotalW;
+
+                // 2. "pixels" Wordmark (with long 'p' descender, diamond 'i' dot, and flush right 's')
+                using (Brush whiteBrush = new SolidBrush(Color.FromArgb(245, 246, 248)))
+                {
+                    // 'p' vertical stem extending down to bottom of spectrum bar
+                    g.FillRectangle(whiteBrush, pX, wordTopY + 18f, 7.5f, (barY + barH) - (wordTopY + 18f));
+
+                    // 'p' bowl
+                    using (Pen bowlPen = new Pen(Color.FromArgb(245, 246, 248), 7.5f))
+                        g.DrawEllipse(bowlPen, pX + 3.5f, wordTopY + 21f, 31f, 33f);
+
+                    // 'i' stem + rotated diamond dot
+                    float iX = pX + 46f;
+                    g.FillRectangle(whiteBrush, iX, wordTopY + 19f, 7.5f, 38f);
+                    PointF[] diamond = new PointF[]
+                    {
+                        new PointF(iX + 3.75f, wordTopY + 1f),
+                        new PointF(iX + 10.25f, wordTopY + 7.5f),
+                        new PointF(iX + 3.75f, wordTopY + 14f),
+                        new PointF(iX - 2.75f, wordTopY + 7.5f)
+                    };
+                    g.FillPolygon(whiteBrush, diamond);
+
+                    // "xels" measured so 's' ends flush with the right edge of the spectrum bar
+                    using (Font fontXels = new Font("Segoe UI", 43f, FontStyle.Regular, GraphicsUnit.Pixel))
+                    using (StringFormat sf = StringFormat.GenericTypographic)
+                    {
+                        SizeF xelsSize = g.MeasureString("xels", fontXels, 300, sf);
+                        float xelsX = barRightX - xelsSize.Width;
+                        g.DrawString("xels", fontXels, whiteBrush, new PointF(xelsX, wordTopY + 11f), sf);
+                    }
+                }
+
+                // 3. Animated 7-Swatch Spectrum Bar (1.6x Left-to-Right Telemetry Wave)
+                float swatchW = barTotalW / 7f;
+                for (int i = 0; i < 7; i++)
+                {
+                    float swatchPhase = (logoAnimPhase - (i * 0.045f) + 1.0f) % 1.0f;
+                    float pulse = (float)Math.Exp(-Math.Pow((swatchPhase - 0.25f) / 0.14f, 2.0));
+
+                    Color baseCol = logoStripeColors[i];
+                    int r = Math.Min(255, (int)(baseCol.R * (0.72f + 0.35f * pulse)));
+                    int gr = Math.Min(255, (int)(baseCol.G * (0.72f + 0.35f * pulse)));
+                    int b = Math.Min(255, (int)(baseCol.B * (0.72f + 0.35f * pulse)));
+
+                    float liftY = -pulse * 1.6f;
+                    float scaleH = barH + pulse * 1.6f;
+
+                    using (Brush swatchBrush = new SolidBrush(Color.FromArgb(r, gr, b)))
+                        g.FillRectangle(swatchBrush, barX + (i * swatchW), barY + liftY, swatchW + 0.4f, scaleH);
+                }
+
+                // 4. "PHOTOLAB" Sub-label flush under the full logo width
+                using (Font fontSub = new Font("Segoe UI", 24.5f, FontStyle.Regular, GraphicsUnit.Pixel))
+                using (Brush subBrush = new SolidBrush(Color.FromArgb(132, 134, 138)))
+                {
+                    g.DrawString("PHOTOLAB", fontSub, subBrush, new PointF(startX - 1f, barY + barH + 5f));
+                }
             }  
             Image? oldImg = picLogo.Image;  
             picLogo.Image = logoBmp;  
@@ -4537,6 +4666,8 @@ namespace LabTools
   
         protected override void OnFormClosed(FormClosedEventArgs e)  
         {  
+            logoAnimTimer?.Stop();
+            logoAnimTimer?.Dispose();
             searchCts?.Cancel();
             copyCts?.Cancel();
             folderWatcher?.Dispose();
