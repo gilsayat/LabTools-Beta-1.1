@@ -3765,11 +3765,11 @@ namespace LabTools
                     g.DrawLine(whitePen, Mx(842f), My(405f), Mx(1162f), My(857f));
                     g.DrawLine(whitePen, Mx(1162f), My(405f), Mx(842f), My(857f));
 
-                    // 'e'
-                    g.DrawArc(whitePen, Mr(1267f, 419f, 1623f, 845f), 38f, 317f);
-                    g.FillRectangle(whiteBrush, Mr(1267f, 595f, 1645f, 667f));
+                    // 'e' (flush right edge at x=1623 so horizontal bar meets outer arc cleanly)
+                    g.DrawArc(whitePen, Mr(1267f, 419f, 1623f, 845f), 38f, 322f);
+                    g.FillRectangle(whiteBrush, Mr(1267f, 595f, 1623f, 667f));
 
-                    // 'l' (continuous vertical stem + rounded bottom foot)
+                    // 'l' (continuous vertical stem + smooth bottom foot)
                     using (GraphicsPath lPath = new GraphicsPath())
                     {
                         lPath.AddLine(Mx(1785f), My(157f), Mx(1785f), My(775f));
@@ -3778,17 +3778,44 @@ namespace LabTools
                         g.DrawPath(whitePen, lPath);
                     }
 
-                    // 's' (continuous smooth S-curve aligned flush right at x=2279)
+                    // 's' (single continuous cubic-Bezier spline — zero AddArc jump artifacts)
                     using (GraphicsPath sPath = new GraphicsPath())
                     using (Pen sPen = new Pen(whiteCol, mainStroke * 0.96f))
                     {
-                        sPath.AddArc(Mr(1984f, 418f, 2242f, 616f), 345f, -180f);
-                        sPath.AddBezier(
-                            Mx(1987f), My(535f),
-                            Mx(2015f), My(635f),
-                            Mx(2220f), My(625f),
-                            Mx(2243f), My(730f));
-                        sPath.AddArc(Mr(1976f, 636f, 2244f, 848f), 355f, 172f);
+                        sPen.LineJoin = LineJoin.Round;
+                        PointF[] sPts = new PointF[]
+                        {
+                            // Top-right terminal -> top crown -> upper-left spine
+                            new PointF(Mx(2224f), My(476f)),
+                            new PointF(Mx(2196f), My(434f)),
+                            new PointF(Mx(2154f), My(419f)),
+                            new PointF(Mx(2112f), My(419f)),
+
+                            // Upper-left spine -> smooth diagonal inflection
+                            new PointF(Mx(2038f), My(419f)),
+                            new PointF(Mx(1992f), My(462f)),
+                            new PointF(Mx(1992f), My(522f)),
+
+                            // Center S-waist -> lower-right curve
+                            new PointF(Mx(1992f), My(585f)),
+                            new PointF(Mx(2062f), My(608f)),
+                            new PointF(Mx(2122f), My(632f)),
+
+                            // Lower-right curve -> outer right belly (flush x=2279 with stroke)
+                            new PointF(Mx(2186f), My(658f)),
+                            new PointF(Mx(2242f), My(686f)),
+                            new PointF(Mx(2242f), My(746f)),
+
+                            // Bottom bowl -> bottom-left terminal
+                            new PointF(Mx(2242f), My(808f)),
+                            new PointF(Mx(2182f), My(845f)),
+                            new PointF(Mx(2108f), My(845f)),
+
+                            new PointF(Mx(2046f), My(845f)),
+                            new PointF(Mx(2002f), My(822f)),
+                            new PointF(Mx(1980f), My(784f))
+                        };
+                        sPath.AddBeziers(sPts);
                         g.DrawPath(sPen, sPath);
                     }
                 }
