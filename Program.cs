@@ -3694,22 +3694,22 @@ namespace LabTools
         {
             int w = Math.Max(280, picLogo.Width);
             int h = Math.Max(198, picLogo.Height);
-            Bitmap logoBmp = new Bitmap(w, h);  
+            Bitmap logoBmp = new Bitmap(w, h);
 
-            using (Graphics g = Graphics.FromImage(logoBmp))  
-            {  
-                g.Clear(Color.FromArgb(18, 19, 22));  
-                g.SmoothingMode = SmoothingMode.AntiAlias;  
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;  
+            using (Graphics g = Graphics.FromImage(logoBmp))
+            {
+                g.Clear(Color.FromArgb(18, 19, 22)); // #121316
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-                // 1. Four Breathing Corner Viewfinder Brackets (1.6x speed)
+                // 1. Four Breathing Corner Viewfinder Brackets (1.6x speed / 2.1875s cycle)
                 float wave = 0.5f - 0.5f * (float)Math.Cos(logoAnimPhase * 2.0 * Math.PI);
-                float inset = 16f - (wave * 3.5f);
+                float inset = 14f - (wave * 3.0f);
                 int alpha = (int)(115 + wave * 125);
 
                 using (Pen bracketPen = new Pen(Color.FromArgb(alpha, 138, 147, 162), 2f))
                 {
-                    float arm = 18f;
+                    float arm = 16f;
                     float x0 = inset, y0 = inset;
                     float x1 = w - inset, y1 = h - inset;
 
@@ -3726,53 +3726,77 @@ namespace LabTools
                     g.DrawLine(bracketPen, x1, y1, x1, y1 - arm);
                 }
 
-                // Centered pixels PHOTOLAB geometry
-                float logoWidth = 216f;
-                float startX = (w - logoWidth) / 2f;
-                float centerY = h / 2f;
+                // Map exact PhotoLabPixel.jpg (2408x1760) vector coordinates centered inside viewport
+                float logoW = 216f;
+                float logoH = logoW * (1760f / 2408f);
+                float ox = (w - logoW) / 2f;
+                float oy = (h - logoH) / 2f;
+                float s = logoW / 2408f;
 
-                float pX = startX + 2f;
-                float wordTopY = centerY - 60f;
-                float barY = centerY + 6f;
-                float barH = 18f;
-                float barX = pX + 14f;
-                float barTotalW = logoWidth - 16f;
-                float barRightX = barX + barTotalW;
+                float Mx(float nx) => ox + nx * s;
+                float My(float ny) => oy + ny * s;
+                RectangleF Mr(float nx0, float ny0, float nx1, float ny1) =>
+                    new RectangleF(ox + nx0 * s, oy + ny0 * s, (nx1 - nx0) * s, (ny1 - ny0) * s);
 
-                // 2. "pixels" Wordmark (with long 'p' descender, diamond 'i' dot, and flush right 's')
-                using (Brush whiteBrush = new SolidBrush(Color.FromArgb(245, 246, 248)))
+                float mainStroke = 78f * s;
+                Color whiteCol = Color.FromArgb(245, 246, 248);
+                Color subCol = Color.FromArgb(132, 134, 138);
+
+                using (Brush whiteBrush = new SolidBrush(whiteCol))
+                using (Pen whitePen = new Pen(whiteCol, mainStroke))
                 {
-                    // 'p' vertical stem extending down to bottom of spectrum bar
-                    g.FillRectangle(whiteBrush, pX, wordTopY + 18f, 7.5f, (barY + barH) - (wordTopY + 18f));
+                    // 2. "pixels" Wordmark (100% unified geometric vector paths — zero font split)
+                    // 'p' vertical descender stem + bowl
+                    g.FillRectangle(whiteBrush, Mr(136f, 388f, 214f, 1150f));
+                    g.DrawEllipse(whitePen, Mr(175f, 419f, 537f, 845f));
 
-                    // 'p' bowl
-                    using (Pen bowlPen = new Pen(Color.FromArgb(245, 246, 248), 7.5f))
-                        g.DrawEllipse(bowlPen, pX + 3.5f, wordTopY + 21f, 31f, 33f);
-
-                    // 'i' stem + rotated diamond dot
-                    float iX = pX + 46f;
-                    g.FillRectangle(whiteBrush, iX, wordTopY + 19f, 7.5f, 38f);
+                    // 'i' rotated diamond dot + stem
                     PointF[] diamond = new PointF[]
                     {
-                        new PointF(iX + 3.75f, wordTopY + 1f),
-                        new PointF(iX + 10.25f, wordTopY + 7.5f),
-                        new PointF(iX + 3.75f, wordTopY + 14f),
-                        new PointF(iX - 2.75f, wordTopY + 7.5f)
+                        new PointF(Mx(688.5f), My(189f)),
+                        new PointF(Mx(753f),   My(254f)),
+                        new PointF(Mx(688.5f), My(319f)),
+                        new PointF(Mx(624f),   My(254f))
                     };
                     g.FillPolygon(whiteBrush, diamond);
+                    g.FillRectangle(whiteBrush, Mr(650f, 388f, 727f, 874f));
 
-                    // "xels" measured so 's' ends flush with the right edge of the spectrum bar
-                    using (Font fontXels = new Font("Segoe UI", 43f, FontStyle.Regular, GraphicsUnit.Pixel))
-                    using (StringFormat sf = StringFormat.GenericTypographic)
+                    // 'x'
+                    g.DrawLine(whitePen, Mx(842f), My(405f), Mx(1162f), My(857f));
+                    g.DrawLine(whitePen, Mx(1162f), My(405f), Mx(842f), My(857f));
+
+                    // 'e'
+                    g.DrawArc(whitePen, Mr(1267f, 419f, 1623f, 845f), 38f, 317f);
+                    g.FillRectangle(whiteBrush, Mr(1267f, 595f, 1645f, 667f));
+
+                    // 'l' (continuous vertical stem + rounded bottom foot)
+                    using (GraphicsPath lPath = new GraphicsPath())
                     {
-                        SizeF xelsSize = g.MeasureString("xels", fontXels, 300, sf);
-                        float xelsX = barRightX - xelsSize.Width;
-                        g.DrawString("xels", fontXels, whiteBrush, new PointF(xelsX, wordTopY + 11f), sf);
+                        lPath.AddLine(Mx(1785f), My(157f), Mx(1785f), My(775f));
+                        lPath.AddArc(Mr(1785f, 710f, 1915f, 840f), 180f, -90f);
+                        lPath.AddLine(Mx(1850f), My(840f), Mx(1886f), My(840f));
+                        g.DrawPath(whitePen, lPath);
+                    }
+
+                    // 's' (continuous smooth S-curve aligned flush right at x=2279)
+                    using (GraphicsPath sPath = new GraphicsPath())
+                    using (Pen sPen = new Pen(whiteCol, mainStroke * 0.96f))
+                    {
+                        sPath.AddArc(Mr(1984f, 418f, 2242f, 616f), 345f, -180f);
+                        sPath.AddBezier(
+                            Mx(1987f), My(535f),
+                            Mx(2015f), My(635f),
+                            Mx(2220f), My(625f),
+                            Mx(2243f), My(730f));
+                        sPath.AddArc(Mr(1976f, 636f, 2244f, 848f), 355f, 172f);
+                        g.DrawPath(sPen, sPath);
                     }
                 }
 
-                // 3. Animated 7-Swatch Spectrum Bar (1.6x Left-to-Right Telemetry Wave)
-                float swatchW = barTotalW / 7f;
+                // 3. Animated 7-Swatch Spectrum Bar (1.6x Left-to-Right Telemetry Wave, flush x=291..2279)
+                float barLeft = 291f;
+                float barRight = 2279f;
+                float swatchW = (barRight - barLeft) / 7f;
                 for (int i = 0; i < 7; i++)
                 {
                     float swatchPhase = (logoAnimPhase - (i * 0.045f) + 1.0f) % 1.0f;
@@ -3783,25 +3807,63 @@ namespace LabTools
                     int gr = Math.Min(255, (int)(baseCol.G * (0.72f + 0.35f * pulse)));
                     int b = Math.Min(255, (int)(baseCol.B * (0.72f + 0.35f * pulse)));
 
-                    float liftY = -pulse * 1.6f;
-                    float scaleH = barH + pulse * 1.6f;
+                    float liftNy = -pulse * 18f;
+                    float sx0 = barLeft + i * swatchW;
+                    float sx1 = sx0 + swatchW + 2f;
 
                     using (Brush swatchBrush = new SolidBrush(Color.FromArgb(r, gr, b)))
-                        g.FillRectangle(swatchBrush, barX + (i * swatchW), barY + liftY, swatchW + 0.4f, scaleH);
+                        g.FillRectangle(swatchBrush, Mr(sx0, 949f + liftNy, sx1, 1152f));
                 }
 
-                // 4. "PHOTOLAB" Sub-label flush under the full logo width
-                using (Font fontSub = new Font("Segoe UI", 24.5f, FontStyle.Regular, GraphicsUnit.Pixel))
-                using (Brush subBrush = new SolidBrush(Color.FromArgb(132, 134, 138)))
+                // 4. "PHOTOLAB" Sub-label spanning full width below (x=145..2264, y=1223..1517)
+                float subStroke = 40f * s;
+                using (Brush subBrush = new SolidBrush(subCol))
+                using (Pen subPen = new Pen(subCol, subStroke))
                 {
-                    g.DrawString("PHOTOLAB", fontSub, subBrush, new PointF(startX - 1f, barY + barH + 5f));
+                    // P
+                    g.FillRectangle(subBrush, Mr(145f, 1223f, 185f, 1517f));
+                    g.DrawArc(subPen, Mr(165f, 1243f, 337f, 1385f), 270f, 180f);
+                    g.FillRectangle(subBrush, Mr(165f, 1223f, 255f, 1263f));
+                    g.FillRectangle(subBrush, Mr(165f, 1365f, 255f, 1405f));
+
+                    // H
+                    g.FillRectangle(subBrush, Mr(413f, 1223f, 453f, 1517f));
+                    g.FillRectangle(subBrush, Mr(592f, 1223f, 632f, 1517f));
+                    g.FillRectangle(subBrush, Mr(433f, 1350f, 612f, 1390f));
+
+                    // O
+                    g.DrawEllipse(subPen, Mr(710f, 1241f, 935f, 1499f));
+
+                    // T
+                    g.FillRectangle(subBrush, Mr(989f, 1223f, 1212f, 1263f));
+                    g.FillRectangle(subBrush, Mr(1080f, 1243f, 1120f, 1517f));
+
+                    // O
+                    g.DrawEllipse(subPen, Mr(1261f, 1241f, 1485f, 1499f));
+
+                    // L
+                    g.FillRectangle(subBrush, Mr(1559f, 1223f, 1599f, 1517f));
+                    g.FillRectangle(subBrush, Mr(1579f, 1477f, 1734f, 1517f));
+
+                    // A
+                    g.DrawLine(subPen, Mx(1775f), My(1510f), Mx(1885f), My(1235f));
+                    g.DrawLine(subPen, Mx(1885f), My(1235f), Mx(1995f), My(1510f));
+                    g.FillRectangle(subBrush, Mr(1812f, 1402f, 1958f, 1440f));
+
+                    // B
+                    g.FillRectangle(subBrush, Mr(2053f, 1223f, 2093f, 1517f));
+                    g.DrawArc(subPen, Mr(2073f, 1243f, 2232f, 1372f), 270f, 180f);
+                    g.DrawArc(subPen, Mr(2073f, 1368f, 2244f, 1497f), 270f, 180f);
+                    g.FillRectangle(subBrush, Mr(2073f, 1223f, 2158f, 1263f));
+                    g.FillRectangle(subBrush, Mr(2073f, 1350f, 2162f, 1388f));
+                    g.FillRectangle(subBrush, Mr(2073f, 1477f, 2166f, 1517f));
                 }
-            }  
-            Image? oldImg = picLogo.Image;  
-            picLogo.Image = logoBmp;  
-            oldImg?.Dispose();  
-        }  
-  
+            }
+            Image? oldImg = picLogo.Image;
+            picLogo.Image = logoBmp;
+            oldImg?.Dispose();
+        }
+
         private void SetupFolderWatcher()  
         {  
             try  
